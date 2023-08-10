@@ -1,11 +1,19 @@
 """
 """
-
+import itertools
 from typing import Any, ClassVar, Dict, Generator, List, Set, Type, TypeAlias
 
 from sqlalchemy import inspect
 from sqlalchemy.orm import InstrumentedAttribute
 from typing_extensions import Self
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
+# Constants
+
+__version__ = "0.0.0"
+
+# %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
+# Types
 
 Pks: TypeAlias = Dict[str, Dict[str, List[int]]]
 IterFks: TypeAlias = Generator[Dict[str, int], None, None]
@@ -66,13 +74,13 @@ class DummyMetaMixins:
         return {tn: ia for tn, ia in f.items() if ia.primary_key}
 
     @classmethod
-    def get_fk_owners(cls) -> Dict[str, str]:
+    def get_fk_owners(cls, primary=False) -> Dict[str, str]:
         """Get owners of the various foreign keys.
 
         :returns: A mapping of tablenames to tables for the foreign keys of
             `cls`.
         """
-        fks = cls.get_fks()
+        fks = cls.get_fks(primary=primary)
         return {
             fname: cls.tables[fk.column.table.name.replace(cls.__prefix__, "")]
             for fname, ff in fks.items()
@@ -93,6 +101,7 @@ class DummyMetaMixins:
     #
     # `create` prefixed methods and their helpers.
 
+    # TODO:
     @classmethod
     def create_iter_fks(
         cls, pks: Pks, repeat: int = 1, primary: bool = False
@@ -114,20 +123,28 @@ class DummyMetaMixins:
             result in yielding of repeated results - the output is not unique.
         """
 
+        ...
+
     @classmethod
-    def _create_coproduct(cls, primary=False) -> Dict[str, List[int]]:
-        fks = cls.get_fks(primary=primary)
+    def _create_coproduct(cls, all_pks, primary=False) -> Dict[str, List[int]]:
+        """Get a tables potential foreign keys and return them as a `dict` of
+        tuples.
+
+        :param primary: Only primary foreign keys.
+        :returns: See desc.
+        """
         fk_owners = cls.get_fk_owners(primary=primary)
         fk_coproduct: Dict[str, List[int]] = {
-            fkname: pks[fkowner.name] for fkname, fkowner in fk_owners.items()
+            fkname: all_pks[fkowner.name] for fkname, fkowner in fk_owners.items()
         }
         return fk_coproduct
 
+    # TODO:
     @classmethod
-    def _create_iter_fks(cls, coproduct, repeat: int = 1):
+    def _create_iter_fks(cls, coproduct: Dict[str, List[int]], repeat: int = 1):
         yield from (
             {key: coord for key, value in zip(coproduct, coord)}
-            for coord in util.product(coproduct.values())
+            for coord in itertools.product(coproduct.values())
             for _ in range(repeat)
         )
 

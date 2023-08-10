@@ -1,0 +1,4 @@
+*.egg-info
+sqlalchemy-dummies
+env
+__pycache__
