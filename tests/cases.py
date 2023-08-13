@@ -3,40 +3,60 @@
 
 """
 import functools
-from typing import Callable, ClassVar, List, Tuple, TypeAlias
+import inspect
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Generator,
+    List,
+    Tuple,
+    Type,
+    TypeAlias,
+)
 
+import pytest
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import DeclarativeMeta, Mapped, mapped_column, registry
 
+SQLAlchemyMetadata = Tuple[Any, DeclarativeMeta]
 DummyCases: TypeAlias = Tuple[DeclarativeMeta, ...]
-DummyCaseGenerator: TypeAlias = Callable[[], DummyCases]
-DummyCaseGeneratorRaw: TypeAlias = Callable[[DeclarativeMeta], DummyCases]
+DummyCaseGenerator: TypeAlias = Callable[[SQLAlchemyMetadata], DummyCases]
+DummyCaseGeneratorRaw: TypeAlias = Callable[[SQLAlchemyMetadata], DummyCases]
 
 
-class Cases:
-    cases: ClassVar[List[DummyCaseGenerator]] = []
-
-    registry: registry  # type: ignore
-    Base: DeclarativeMeta
-
-    def __init__(self):
-        self.registry = registry()
-        self.Base = self.registry.generate_base()
-
-    def __call__(self, fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
-        @functools.wraps(fn)
-        def wrapper() -> DummyCases:
-            results = fn(self.Base)
-            return results
-
-        self.cases.append(wrapper)
-
-        return wrapper
+cases: Dict[str, DummyCaseGenerator] = {}
 
 
-@Cases()
-def cycle(Base: DeclarativeMeta) -> DummyCases:
+def case(fn: DummyCaseGenerator) -> DummyCaseGenerator:
+    cases[fn.__name__] = fn
+    return pytest.fixture(fn)
+
+
+@pytest.fixture
+def Cases() -> Dict[str, DummyCases]:
+    return {name: case(decl()) for name, case in cases.items()}
+
+
+def decl() -> SQLAlchemyMetadata:
+    r = registry()
+    Base = r.generate_base()
+
+    return r, Base
+
+
+@pytest.fixture
+def Decl() -> SQLAlchemyMetadata:
+    return decl()
+
+
+@case
+def Cycle(Decl: SQLAlchemyMetadata) -> DummyCases:
     """Generate tables representing an order four cyclic graph."""
+
+    Base: DeclarativeMeta
+    _, Base = Decl
 
     class A(Base):
         __tablename__ = "a"
@@ -61,12 +81,14 @@ def cycle(Base: DeclarativeMeta) -> DummyCases:
     return (A, B, C, D)
 
 
-@Cases()
-def connected(Base: DeclarativeMeta) -> DummyCases:
+@case
+def Connected(Decl: Tuple[Any, DeclarativeMeta]) -> DummyCases:
     """Completely connected directed graph of of order 5.
 
     This exists so that we can test primary foreign keys.
     """
+
+    _, Base = Decl
 
     class A(Base):
         __tablename__ = "a"
@@ -112,8 +134,10 @@ def connected(Base: DeclarativeMeta) -> DummyCases:
     return (A, B, C, D, E)
 
 
-@Cases()
-def many_many(Base: DeclarativeMeta) -> DummyCases:
+@case
+def ManyMany(Decl: Tuple[Any, DeclarativeMeta]) -> DummyCases:
+    _, Base = Decl
+
     class A(Base):
         __tablename__ = "a"
         id: Mapped[int] = mapped_column(primary_key=True)
@@ -128,3 +152,6 @@ def many_many(Base: DeclarativeMeta) -> DummyCases:
         id: Mapped[int] = mapped_column(primary_key=True)
 
     return (A, B, C)
+
+
+__all__ = ("Cases", "Cycle", "Connected", "ManyMany")
