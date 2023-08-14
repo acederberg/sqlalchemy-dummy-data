@@ -5,11 +5,11 @@ from typing import Dict, List, Type
 from sqlalchemy.orm import DeclarativeMeta
 from sqlalchemy_dummy_data import DummyMetaMixins
 
-from .cases import DummyCases
+from .cases import Cases
 
 
 class TestCases:
-    def validate_output(self, name: str, output: DummyCases):
+    def validate_output(self, name: str, output: Cases):
         """Inspect output from a `case`."""
 
         def fmt(k: int, T: Type) -> str:
@@ -33,10 +33,10 @@ class TestCases:
         msg = json.dumps(msgs, indent=2, default=str) + "`"
         return msg
 
-    def test_cases(self, Cases):
+    def test_cases(self, ormCases):
         msgs = {
             name: o
-            for name, case_output in Cases.items()
+            for name, case_output in ormCases.items()
             if (o := tuple(self.validate_output(name, case_output)))
         }
         if msgs:
@@ -49,5 +49,5 @@ class TestDummyMetaMixins:
         attrs = ("tables", "tablesnames", "fks", "pks", "pknames", "fknames")
         assert not all(hasattr(DummyMetaMixins, attr) for attr in attrs)
 
-    def test_get_fks(self, Cycle):
+    def test_get_fks(self, ormCycle):
         ...

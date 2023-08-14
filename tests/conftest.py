@@ -1,3 +1,3 @@
 import pytest
 
-from .cases import Cases, Connected, Cycle, Decl, ManyMany
+from .cases import ormCases, ormConnected, ormCycle, ormDecl, ormManyMany

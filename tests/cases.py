@@ -1,59 +1,70 @@
 """Test case generators and test case helpers.
 
-
+:type SQLAlchemyOrmTuple: Type alias for the tuple of important sqlalchemy orm
+    objects used to setup declarative sqlalchemy.
+:type RawCases: A tuple of types used to generate orm objects (without 
+    inheritance). It is important that these types not use the orm or 
+    metaclasses when returned from their owning functions (usually a function
+    decorated with :func:`as_case`).
+:type Cases: A tuple of sqlalchemy orm objects.
+:type DummyCaseGenerator: Call signature for cases after decoration.
+:type DummyCaseGeneratorRaw: Call signature for cases before decoration.
+:const cases: A dictionary of all of the cases (populated by the :func:`as_case`
+    decorator). This should not be modified.
 """
 import functools
 import inspect
-from typing import (
-    Any,
-    Callable,
-    ClassVar,
-    Dict,
-    Generator,
-    List,
-    Optional,
-    Tuple,
-    Type,
-    TypeAlias,
-)
+from typing import Any, Callable, Dict, Tuple, Type, TypeAlias
 
 import pytest
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import DeclarativeMeta, Mapped, mapped_column, registry
 from sqlalchemy_dummy_data import create_dummy_meta
 
-SQLAlchemyMetadata = Tuple[Any, DeclarativeMeta]
-RawDummyCases: TypeAlias = Tuple[Type, ...]
-DummyCases: TypeAlias = Tuple[DeclarativeMeta, ...]
-DummyCaseGenerator: TypeAlias = Callable[[SQLAlchemyMetadata, Any], DummyCases]
-DummyCaseGeneratorRaw: TypeAlias = Callable[[], RawDummyCases]
+SQLAlchemyOrmTuple = Tuple[Any, DeclarativeMeta]
+RawCases: TypeAlias = Tuple[Type, ...]
+Cases: TypeAlias = Tuple[DeclarativeMeta, ...]
+DummyCaseGenerator: TypeAlias = Callable[[SQLAlchemyOrmTuple, Any], Cases]
+DummyCaseGeneratorRaw: TypeAlias = Callable[[], RawCases]
 
 
 cases: Dict[str, DummyCaseGenerator] = {}
 
 
-def case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
+def as_case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
+    """Turn a function returning types into a function returning these types
+    with the necessary sqlalchemy pieces needed to function in the context of
+    a database.
+
+    :param fn: A fuction with no parameters returing a tuple of types (these
+        should look like sqlalchemy orm models without inheritance from
+        `Base`).
+    :raises ValueError: When :param:`fn` has a bad signature.
+    :returns: Decorated :param:`fn` as a parametrizable pytest fixture that
+        uses the pytest fixture :func:`ormDecl`. The parameter should be set
+        to `True` when the dummy data metaclass from :func:`create_dummy_meta`
+        is to be used. This function will raise a `ValueError` when arguments/
+        fixutres/the `request` is malformed.
+    """
     sig = inspect.signature(fn)
     _msg = f"Invalid signature for `{fn.__name__}`."
     if sig.parameters:
         raise ValueError(_msg + " Expected no parameters.")
-    elif sig.return_annotation != RawDummyCases:
-        print(sig.return_annotation)
-        print(RawDummyCases)
-        _msg += " Should return `RawDummyCases`,  not `{0}`"
+    elif sig.return_annotation != RawCases:
+        _msg += " Should return `RawCases`,  not `{0}`"
         raise ValueError(_msg.format(sig.return_annotation))
 
-    def wrapper(Decl: SQLAlchemyMetadata, request=None) -> DummyCases:
+    def wrapper(ormDecl: SQLAlchemyOrmTuple, request=None) -> Cases:
         param = getattr(request, "param", None)
         hasparam = request is not None and param is not None
         if hasparam and not isinstance(param, bool):
             _msg = f"Cannot parametrize `{0}` with non-boolean value `{1}`."
             raise ValueError(_msg.format(fn.__name__, param))
-        elif not isinstance(Decl, tuple) or len(Decl) != 2:
-            raise ValueError("`Decl` must be a tuple of length 2.")
+        elif not isinstance(ormDecl, tuple) or len(ormDecl) != 2:
+            raise ValueError("`ormDecl` must be a tuple of length 2.")
 
         Base: DeclarativeMeta
-        _, Base = Decl
+        _, Base = ormDecl
 
         T: Type[type]
         T = type if not hasparam else create_dummy_meta(Base)  # type: ignore
@@ -74,11 +85,15 @@ def case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
 
 
 @pytest.fixture
-def Cases(request) -> Dict[str, DummyCases]:
+def ormCases(request) -> Dict[str, Cases]:
+    """Return a mapping of all orm :type:`Cases` as specified by
+    :const:`cases`.
+    """
     return {name: case(decl(), request) for name, case in cases.items()}
 
 
-def decl() -> SQLAlchemyMetadata:
+def decl() -> SQLAlchemyOrmTuple:
+    """Create the sqlalchemy orm boilerplate stuff."""
     r = registry()
     Base = r.generate_base()
 
@@ -86,13 +101,14 @@ def decl() -> SQLAlchemyMetadata:
 
 
 @pytest.fixture
-def Decl() -> SQLAlchemyMetadata:
+def ormDecl() -> SQLAlchemyOrmTuple:
+    f"{decl.__doc__}"
     return decl()
 
 
-@case
-def Cycle() -> RawDummyCases:
-    """Generate tables representing an order four cyclic graph."""
+@as_case
+def ormCycle() -> RawCases:
+    """Tables representing an order four cyclic graph."""
 
     class A:
         __tablename__ = "a"
@@ -117,9 +133,9 @@ def Cycle() -> RawDummyCases:
     return (A, B, C, D)
 
 
-@case
-def Connected() -> RawDummyCases:
-    """Completely connected directed graph of of order 5.
+@as_case
+def ormConnected() -> RawCases:
+    """Tables representing a completely connected directed graph of of order 5.
 
     This exists so that we can test primary foreign keys.
     """
@@ -168,8 +184,11 @@ def Connected() -> RawDummyCases:
     return (A, B, C, D, E)
 
 
-@case
-def ManyMany() -> RawDummyCases:
+@as_case
+def ormManyMany() -> RawCases:
+    """Tables representing a many to many relationship as described by the
+    SQLAlchemy2 docs."""
+
     class A:
         __tablename__ = "a"
         id: Mapped[int] = mapped_column(primary_key=True)
@@ -186,4 +205,4 @@ def ManyMany() -> RawDummyCases:
     return (A, B, C)
 
 
-__all__ = ("Cases", "Cycle", "Connected", "ManyMany")
+__all__ = ("ormCases", "ormCycle", "ormConnected", "ormManyMany")
