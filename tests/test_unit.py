@@ -1,7 +1,7 @@
-import inspect
 import json
 from typing import Dict, List, Type
 
+import pytest
 from sqlalchemy.orm import DeclarativeMeta
 from sqlalchemy_dummy_data import DummyMetaMixins
 
@@ -42,12 +42,24 @@ class TestCases:
         if msgs:
             raise AssertionError(self.format_output(msgs))
 
+    def check_output_attrs(self, tables, attr: str, expect: bool):
+        bad = tuple(table for table in tables if hasattr(table, attr) != expect)
+
+        if len(bad):
+            print(hasattr(tables[0], "get_fks"), expect)
+            msg = "\n".join(f"-  {b.__name__}" for b in bad)
+            msg = f"The following tables were {{0}}missing `get_fks`: \n{msg}"
+            raise AssertionError(msg.format("not " if not expect else ""))
+
+    @pytest.mark.parametrize(
+        "ormCycle, expect", [(True, True), (False, False)], indirect=["ormCycle"]
+    )
+    def test_parametrize(self, ormCycle, expect):
+        self.check_output_attrs(ormCycle, "get_pks", expect)
+
 
 class TestDummyMetaMixins:
     def test_classvars_unassigned(self):
         # Assigining these would be stupid, hence this test.
         attrs = ("tables", "tablesnames", "fks", "pks", "pknames", "fknames")
         assert not all(hasattr(DummyMetaMixins, attr) for attr in attrs)
-
-    def test_get_fks(self, ormCycle):
-        ...

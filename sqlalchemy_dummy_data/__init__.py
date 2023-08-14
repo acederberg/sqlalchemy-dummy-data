@@ -1,6 +1,7 @@
 """
 """
 import itertools
+import logging
 from typing import Any, ClassVar, Dict, Generator, List, Set, Type, TypeAlias
 
 from sqlalchemy import inspect
@@ -11,6 +12,8 @@ from typing_extensions import Self
 # Constants
 
 __version__ = "0.0.0"
+logger = logging.getLogger(__name__)
+
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
 # Types
@@ -18,6 +21,7 @@ __version__ = "0.0.0"
 Pks: TypeAlias = Dict[str, Dict[str, List[int]]]
 IterFks: TypeAlias = Generator[Dict[str, int], None, None]
 IterSelf: TypeAlias = Generator[Self, None, None]  # type: ignore
+
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
 # Definitions that should not be used directly by consumers in most cases.

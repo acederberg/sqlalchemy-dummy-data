@@ -2,18 +2,19 @@
 
 :type SQLAlchemyOrmTuple: Type alias for the tuple of important sqlalchemy orm
     objects used to setup declarative sqlalchemy.
-:type RawCases: A tuple of types used to generate orm objects (without 
-    inheritance). It is important that these types not use the orm or 
+:type RawCases: A tuple of types used to generate orm objects (without
+    inheritance). It is important that these types not use the orm or
     metaclasses when returned from their owning functions (usually a function
     decorated with :func:`as_case`).
 :type Cases: A tuple of sqlalchemy orm objects.
 :type DummyCaseGenerator: Call signature for cases after decoration.
 :type DummyCaseGeneratorRaw: Call signature for cases before decoration.
-:const cases: A dictionary of all of the cases (populated by the :func:`as_case`
-    decorator). This should not be modified.
+:const cases: A dictionary of all of the cases (populated by the
+    :func:`as_case` decorator). This should not be modified.
 """
 import functools
 import inspect
+import logging
 from typing import Any, Callable, Dict, Tuple, Type, TypeAlias
 
 import pytest
@@ -28,6 +29,8 @@ DummyCaseGenerator: TypeAlias = Callable[[SQLAlchemyOrmTuple, Any], Cases]
 DummyCaseGeneratorRaw: TypeAlias = Callable[[], RawCases]
 
 
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 cases: Dict[str, DummyCaseGenerator] = {}
 
 
@@ -46,19 +49,23 @@ def as_case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
         is to be used. This function will raise a `ValueError` when arguments/
         fixutres/the `request` is malformed.
     """
+
+    logger.debug("`as_case` decorating `%s`.", name := fn.__name__)
+    logger.debug("Validating signature of `%s`.", name)
     sig = inspect.signature(fn)
-    _msg = f"Invalid signature for `{fn.__name__}`."
+    _msg = f"Invalid signature for `{name}`."
     if sig.parameters:
         raise ValueError(_msg + " Expected no parameters.")
     elif sig.return_annotation != RawCases:
         _msg += " Should return `RawCases`,  not `{0}`"
         raise ValueError(_msg.format(sig.return_annotation))
 
-    def wrapper(ormDecl: SQLAlchemyOrmTuple, request=None) -> Cases:
+    def wrapper(ormDecl: SQLAlchemyOrmTuple, request) -> Cases:
         param = getattr(request, "param", None)
         hasparam = request is not None and param is not None
+        print(param, hasparam)
         if hasparam and not isinstance(param, bool):
-            _msg = f"Cannot parametrize `{0}` with non-boolean value `{1}`."
+            _msg = "Cannot parametrize `{0}` with non-boolean value `{1}`."
             raise ValueError(_msg.format(fn.__name__, param))
         elif not isinstance(ormDecl, tuple) or len(ormDecl) != 2:
             raise ValueError("`ormDecl` must be a tuple of length 2.")
@@ -66,21 +73,23 @@ def as_case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
         Base: DeclarativeMeta
         _, Base = ormDecl
 
-        T: Type[type]
-        T = type if not hasparam else create_dummy_meta(Base)  # type: ignore
         Raw = fn()
+        T: Type[type]
+        T, bases = (type, (Base,)) if not param else (create_dummy_meta(Base), tuple())  # type: ignore
 
-        return tuple(T(R.__name__, (R, Base), {}) for R in Raw)
+        logger.debug("`%s` using metaclass = `%s`.", name, T)
+        return tuple(T(R.__name__, (R, *bases), {}) for R in Raw)
 
     # `functools` wrap and sig
     # Keep sig bc `wraps` overwrites
+    logger.debug("Setting call signture of decorated `%s`.", name)
     sig = inspect.signature(wrapper)
     wrapper = functools.wraps(fn)(wrapper)
     setattr(wrapper, "__signature__", sig)
     cases[wrapper.__name__] = wrapper
 
     # `pytest` wrap
-    wrapper = pytest.fixture(wrapper)
+    wrapper = pytest.fixture(params=[False])(wrapper)
     return wrapper
 
 
