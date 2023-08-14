@@ -5,7 +5,7 @@ from typing import Dict, List, Type
 from sqlalchemy.orm import DeclarativeMeta
 from sqlalchemy_dummy_data import DummyMetaMixins
 
-from .cases import DummyCases, cases
+from .cases import DummyCases
 
 
 class TestCases:
