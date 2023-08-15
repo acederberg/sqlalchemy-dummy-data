@@ -89,7 +89,7 @@ def as_case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
     cases[wrapper.__name__] = wrapper
 
     # `pytest` wrap
-    wrapper = pytest.fixture(params=[False])(wrapper)
+    wrapper = pytest.fixture(params=[True])(wrapper)
     return wrapper
 
 
@@ -188,7 +188,6 @@ def ormConnected() -> RawCases:
         id_b: Mapped[int] = mapped_column(ForeignKey("b.id"), primary_key=True)
         id_c: Mapped[int] = mapped_column(ForeignKey("c.id"), primary_key=True)
         id_d: Mapped[int] = mapped_column(ForeignKey("d.id"), primary_key=True)
-        id_e: Mapped[int] = mapped_column(ForeignKey("e.id"), primary_key=True)
 
     return (A, B, C, D, E)
 

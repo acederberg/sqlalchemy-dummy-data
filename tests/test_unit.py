@@ -1,16 +1,23 @@
 import json
-from typing import Dict, List, Type
+import logging
+import re
+from typing import Dict, List, Tuple, Type
 
 import pytest
-from sqlalchemy.orm import DeclarativeMeta
+from sqlalchemy import Column
+from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy_dummy_data import DummyMetaMixins
 
 from .cases import Cases
+
+logger = logging.getLogger(__name__)
 
 
 class TestCases:
     def validate_output(self, name: str, output: Cases):
         """Inspect output from a `case`."""
+
+        logger.debug("Validating output of case `%s`.", name)
 
         def fmt(k: int, T: Type) -> str:
             return (
@@ -28,12 +35,13 @@ class TestCases:
         )
         yield from bad
 
-    def format_output(self, msgs: Dict[str, List[str]]):
+    def format_output(self, msgs: Dict[str, Tuple[str, ...]]):
         msg = "Some `cases` did not pass validation. Detail `"
         msg = json.dumps(msgs, indent=2, default=str) + "`"
         return msg
 
     def test_cases(self, ormCases):
+        logger.debug("Validating output of all `ormCases`.")
         msgs = {
             name: o
             for name, case_output in ormCases.items()
@@ -43,7 +51,7 @@ class TestCases:
             raise AssertionError(self.format_output(msgs))
 
     def check_output_attrs(self, tables, attr: str, expect: bool):
-        bad = tuple(table for table in tables if hasattr(table, attr) != expect)
+        bad = tuple(t for t in tables if hasattr(t, attr) != expect)
 
         if len(bad):
             print(hasattr(tables[0], "get_fks"), expect)
@@ -52,14 +60,107 @@ class TestCases:
             raise AssertionError(msg.format("not " if not expect else ""))
 
     @pytest.mark.parametrize(
-        "ormCycle, expect", [(True, True), (False, False)], indirect=["ormCycle"]
+        "ormCycle, expect",
+        [(True, True), (False, False)],
+        indirect=["ormCycle"],
     )
     def test_parametrize(self, ormCycle, expect):
+        logger.debug("Verifying `ormCycle` fixture parametrization.")
         self.check_output_attrs(ormCycle, "get_pks", expect)
 
 
 class TestDummyMetaMixins:
+    """Test the methods defined on :class:`DummyMetaMixins` that do not require
+    a database connection.
+
+    :attr pattern_owner: Regular expression to determine a columns foreign key
+        owner from the `repr` of that `Column`.
+    """
+
+    pattern_owner: re.Pattern = re.compile(
+        "ForeignKey\\('(?P<owner>\\w*)\\.(?P<id>\\w*)'\\)"
+    )
+
     def test_classvars_unassigned(self):
         # Assigining these would be stupid, hence this test.
         attrs = ("tables", "tablesnames", "fks", "pks", "pknames", "fknames")
         assert not all(hasattr(DummyMetaMixins, attr) for attr in attrs)
+
+    def test_cycle(self, ormCycle):
+        # Use symetry to make assertions. ... -> D -> A -> B -> C -> D -> ...
+
+        logger.info("Checking metaclass methods on `ormCycle`.")
+        for k, table in enumerate(ormCycle):
+            logger.debug("Checking foreign keys for `%s`.", name := table.__name__)
+            fks = table.get_fks()
+            assert isinstance(fks, dict)
+            if n := len(fks) != 1:
+                msg = f"Expected at most one edge per node, got `{n}`."
+                raise AssertionError(msg)
+
+            # Get owner with grep. Only doing this once for now.
+            logger.debug("Checking ownership of the foreign key(s) of `%s`.", name)
+            id_parent = fks["id_parent"]
+            assert isinstance(id_parent, Column)
+            matched = self.pattern_owner.search(repr(id_parent))
+            if matched is None:
+                print("1", repr(fks["id_parent"]))
+                msg = "Could not find anything to match `{0}`."
+                raise AssertionError(msg.format(self.pattern_owner.pattern))
+            owner = matched.group("owner")
+            expect_owner = ormCycle[(k - 1) % len(ormCycle)].__name__.lower()
+            assert owner == expect_owner
+            assert matched.group("id") == "id"
+
+            # Check grep owner against computed.
+            computed_owners = table.get_fk_owners()
+            assert isinstance(computed_owners, dict)
+            if len(computed_owners) != 1:
+                msg = "Number of owners of foreign keys should equal number "
+                raise AssertionError(msg + "of foreign keys.")
+
+            computed_owner = computed_owners["id_parent"].__tablename__
+            assert computed_owner == expect_owner
+
+            # Check primary keys.
+            logger.debug("Checking primary keys.")
+            pks = table.get_pks()
+            if (n := len(pks)) != 1:
+                raise AssertionError("Expected only only primary key.")
+
+            assert pks["id"].name == "id"
+
+            # Check primary foreign keys. This table defines none.
+            fks = table.get_fks(only_primary=True)
+            assert not fks
+
+    def test_connected(self, ormConnected):
+        for k, table in enumerate(ormConnected):
+            logger.debug("Checking foreign keys for `%s`.", name := table.__name__)
+            fks = table.get_fks(exclude_primary=True)
+            assert not fks, "This table has no 'pure' foreign keys."
+
+            fks = table.get_fks(only_primary=True)
+            expected_fks = {
+                f"id_{table.__tablename__}"
+                for j, table in enumerate(ormConnected)
+                if j != k
+            }
+            assert len(expected_fks) == 4
+            if len(fks) != 4:
+                msg = "Expected 4 edges in a completely connected graph."
+                raise AssertionError(msg)
+            elif len(bad := set(fks) - expected_fks):
+                raise AssertionError(f"Unexpected foreign keys: `{bad}`.")
+
+            logger.debug("Checking ownership of the foreign key(s) of `%s`.", name)
+            fk_owners = table.get_fk_owners(exclude_primary=True)
+            assert not len(fk_owners), "This table has no 'pure' foreign keys."
+
+            fk_owners = table.get_fk_owners(only_primary=True)
+
+            logger.debug("Checking primary keys.")
+            pks = table.get_pks()
+            if (n := len(pks)) != 5:
+                msg = f"Expected only 5 primary keys, got `{n}`."
+                raise AssertionError(msg)

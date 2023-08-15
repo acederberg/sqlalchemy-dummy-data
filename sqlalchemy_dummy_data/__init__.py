@@ -2,11 +2,11 @@
 """
 import itertools
 import logging
-from typing import Any, ClassVar, Dict, Generator, List, Set, Type, TypeAlias
+from typing import Any, ClassVar, Dict, Generator, List, Set, Type, TypeAlias, TypedDict
 
-from sqlalchemy import inspect
+from sqlalchemy import Column, inspect
 from sqlalchemy.orm import InstrumentedAttribute
-from typing_extensions import Self
+from typing_extensions import Self, Unpack
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
 # Constants
@@ -27,12 +27,16 @@ IterSelf: TypeAlias = Generator[Self, None, None]  # type: ignore
 # Definitions that should not be used directly by consumers in most cases.
 
 
+class FksKwargs(TypedDict):
+    exclude_primary: bool
+    only_primary: bool
+
+
 class DummyMetaMixins:
     """Methods that I'd rather not wrap in the class created by
     :func:`create_dummy_meta` as it makes it rather unreadable and assists in
     testing.
 
-    :attr __prefix__: Prefix for table names.
     :attr tables: A mapping from table names to table mapped class name.
     :attr tablenames: Set of all tablenames.
     :attr fks: A mapping from tablenames to a mapping of primary key names
@@ -45,18 +49,9 @@ class DummyMetaMixins:
 
     # ======================================================================= #
     # INTERNALS
-    #
-    # DO NOT ASSIGN! THESE WILL BE ASSIGENED INSIDE :func:`create_dummy_meta`.
-    # These are defined here for optimal editor functionality.
 
-    __prefix__: ClassVar[str]
-
-    tables: ClassVar[Dict[str, Any]]
-    tablenames: ClassVar[Set[str]]
-    fks: ClassVar[Dict[str, Dict[str, InstrumentedAttribute]]]
-    pks: ClassVar[Dict[str, Dict[str, InstrumentedAttribute]]]
-    pknames: ClassVar[Set[str]]
-    fknames: ClassVar[Set[str]]
+    __tablename__: ClassVar[str]
+    __dummies__: ClassVar[Any]
 
     # ======================================================================= #
     # CONVENIENCES
@@ -64,29 +59,43 @@ class DummyMetaMixins:
     # `get` prefixed methods.
 
     @classmethod
-    def get_fks(cls, primary=False) -> Dict[str, InstrumentedAttribute]:
+    def get_fks(
+        cls, exclude_primary=False, only_primary=False
+    ) -> Dict[str, InstrumentedAttribute]:
         """Get the foreign keys for `cls`.
 
-        :param primary: When `True`, only return foreign keys that are also
-            primary keys.
+        :param exclude_primary: When `True`, only return foreign keys that are
+            also primary keys.
         :returns: A dictionary of foreign key names mapping to the foreign key
             `InstrumentedAttribute`s.
         """
-        f = cls.fks[cls.__name__]
-        if not primary:
-            return f
-        return {tn: ia for tn, ia in f.items() if ia.primary_key}
+        f = cls.__dummies__.fks[cls.__tablename__]
+        match [exclude_primary, only_primary]:
+            case [True, True]:
+                raise ValueError(
+                    f"Cannot use both `exclude_primary` and `only_primary`."
+                )
+            case [True, False]:
+                # non primary
+                return {tn: ia for tn, ia in f.items() if not ia.primary_key}
+            case [False, False]:
+                # all.
+                return f
+            case [False, True]:
+                # non foreign.
+                return {tn: ia for tn, ia in f.items() if ia.primary_key}
 
     @classmethod
-    def get_fk_owners(cls, primary=False) -> Dict[str, str]:
+    def get_fk_owners(cls, **kwargs: Unpack[FksKwargs]) -> Dict[str, str]:
         """Get owners of the various foreign keys.
 
+        :param exclude_primary: Exclude results for primary foreign keys.
         :returns: A mapping of tablenames to tables for the foreign keys of
             `cls`.
         """
-        fks = cls.get_fks(primary=primary)
+        fks = cls.get_fks(**kwargs)
         return {
-            fname: cls.tables[fk.column.table.name.replace(cls.__prefix__, "")]
+            fname: cls.__dummies__.tables[fk.column.table.name]
             for fname, ff in fks.items()
             for fk in ff.foreign_keys
         }
@@ -98,7 +107,7 @@ class DummyMetaMixins:
         :returns: A mapping of primary key names to their respective
             `InstrumentedAttribute`.
         """
-        return cls.pks[cls.__name__]
+        return cls.__dummies__.pks[cls.__tablename__]
 
     # ======================================================================= #
     # FOREIGN KEY AND PRIMARY FOREIGN KEY ITERATION.
@@ -186,15 +195,15 @@ def create_dummy_meta(Base) -> Type:
 
         """
 
-        tables = dict()
-        tablenames = set()
-        fks = dict()
-        pks = dict()
-        pknames = set()
-        fknames = set()
+        tables: ClassVar[Dict[str, Any]] = dict()
+        tablenames: ClassVar[Set[str]] = set()
+        fks: ClassVar[Dict[str, Dict[str, Column]]] = dict()
+        pks: ClassVar[Dict[str, Dict[str, Column]]] = dict()
+        pknames: ClassVar[Set[str]] = set()
+        fknames: ClassVar[Set[str]] = set()
 
         @classmethod
-        def _registerTable(cls, name, Table):
+        def _registerTable(cls, Table):
             """Collect a bunch of metadata about the models for model methods.
 
             :param name: Name of the table.
@@ -202,6 +211,7 @@ def create_dummy_meta(Base) -> Type:
             :returns: Nothing.
             """
 
+            name = Table.__tablename__
             cls.tablenames.add(name)
 
             i = inspect(Table)
@@ -237,8 +247,9 @@ def create_dummy_meta(Base) -> Type:
             # cls._verifyCreateDummyArgs(name, bases, dict_)
 
             # Create and register instance.
+            dict_["__dummies__"] = cls
             T = type(name, (Base, DummyMetaMixins, *bases), dict_)
-            cls._registerTable(name, T)
+            cls._registerTable(T)
             return T
 
     return DummyMeta
