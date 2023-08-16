@@ -6,8 +6,9 @@ from typing import Dict, List, Tuple, Type
 import pytest
 from sqlalchemy import Column
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
-from sqlalchemy_dummy_data import DummyMetaMixins
+from sqlalchemy_dummy_data import DummyMixins, Pks
 
+from .assets import Assets
 from .cases import Cases
 
 logger = logging.getLogger(__name__)
@@ -69,8 +70,8 @@ class TestCases:
         self.check_output_attrs(ormCycle, "get_pks", expect)
 
 
-class TestDummyMetaMixins:
-    """Test the methods defined on :class:`DummyMetaMixins` that do not require
+class TestDummyMixins:
+    """Test the methods defined on :class:`DummyMixins` that do not require
     a database connection.
 
     :attr pattern_owner: Regular expression to determine a columns foreign key
@@ -84,7 +85,7 @@ class TestDummyMetaMixins:
     def test_classvars_unassigned(self):
         # Assigining these would be stupid, hence this test.
         attrs = ("tables", "tablesnames", "fks", "pks", "pknames", "fknames")
-        assert not all(hasattr(DummyMetaMixins, attr) for attr in attrs)
+        assert not all(hasattr(DummyMixins, attr) for attr in attrs)
 
     def test_cycle(self, ormCycle):
         # Use symetry to make assertions. ... -> D -> A -> B -> C -> D -> ...
@@ -164,3 +165,31 @@ class TestDummyMetaMixins:
             if (n := len(pks)) != 5:
                 msg = f"Expected only 5 primary keys, got `{n}`."
                 raise AssertionError(msg)
+
+    def test_get_fk(self, ormConnected):
+        a, *_ = ormConnected
+        with pytest.raises(ValueError) as err:
+            a.get_fks(exclude_primary=True, only_primary=True)
+
+        assert "Cannot use both" in str(err.value)
+
+        all_fks = a.get_fks()
+        assert len(all_fks) == 4
+
+        primary_fks = a.get_fks(only_primary=True)
+        assert len(primary_fks) == 4
+
+        pure_fks = a.get_fks(exclude_primary=True)
+        assert len(pure_fks) == 0
+
+    def test__create_coproduct_no_db(self, ormConnected: Cases):
+        all_pks: Pks = Assets.yaml("ormCycleAllPks.yaml")
+        a, *_ = ormConnected
+        coproduct: Dict[str, List[int]] = a._create_coproduct(all_pks)
+        assert len(coproduct) == 4
+
+        coproduct = a._create_coproduct(all_pks, primary_only=True)
+        assert len(coproduct) == 4
+
+        coproduct = a._create_coproduct(all_pks, exclude_primary=True)
+        assert len(coproduct) == 0

@@ -20,11 +20,11 @@ from typing import Any, Callable, Dict, Tuple, Type, TypeAlias
 import pytest
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import DeclarativeMeta, Mapped, mapped_column, registry
-from sqlalchemy_dummy_data import create_dummy_meta
+from sqlalchemy_dummy_data import DummyMixins, create_dummy_meta
 
 SQLAlchemyOrmTuple = Tuple[Any, DeclarativeMeta]
 RawCases: TypeAlias = Tuple[Type, ...]
-Cases: TypeAlias = Tuple[DeclarativeMeta, ...]
+Cases: TypeAlias = Tuple[DeclarativeMeta | DummyMixins, ...]
 DummyCaseGenerator: TypeAlias = Callable[[SQLAlchemyOrmTuple, Any], Cases]
 DummyCaseGeneratorRaw: TypeAlias = Callable[[], RawCases]
 
