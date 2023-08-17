@@ -1,7 +1,7 @@
 import json
 import logging
 import re
-from typing import Dict, List, Tuple, Type
+from typing import ClassVar, Dict, List, Tuple, Type
 
 import pytest
 from sqlalchemy import Column
@@ -78,7 +78,8 @@ class TestDummyMixins:
         owner from the `repr` of that `Column`.
     """
 
-    pattern_owner: re.Pattern = re.compile(
+    all_pks: ClassVar[Pks] = Assets.yaml("ormCycleAllPks.yaml")
+    pattern_owner: ClassVar[re.Pattern] = re.compile(
         "ForeignKey\\('(?P<owner>\\w*)\\.(?P<id>\\w*)'\\)"
     )
 
@@ -183,13 +184,34 @@ class TestDummyMixins:
         assert len(pure_fks) == 0
 
     def test__create_coproduct_no_db(self, ormConnected: Cases):
-        all_pks: Pks = Assets.yaml("ormCycleAllPks.yaml")
-        a, *_ = ormConnected
-        coproduct: Dict[str, List[int]] = a._create_coproduct(all_pks)
+        a: DummyMixins
+        a, *_ = ormConnected  # type: ignore
+        coproduct: Dict[str, List[int]] = a._create_coproduct(self.all_pks)
         assert len(coproduct) == 4
 
-        coproduct = a._create_coproduct(all_pks, primary_only=True)
+        coproduct = a._create_coproduct(self.all_pks, only_primary=True)
         assert len(coproduct) == 4
 
-        coproduct = a._create_coproduct(all_pks, exclude_primary=True)
+        coproduct = a._create_coproduct(self.all_pks, exclude_primary=True)
         assert len(coproduct) == 0
+
+    def test__create_iter_fks(self, ormConnected: Cases):
+        a: DummyMixins
+        a, *_ = ormConnected  # type: ignore
+
+        # Check the size of the entire product.
+        product = tuple(a._create_iter_fks(self.all_pks, only_primary=True))
+        assert len(product) == 4**4
+
+        # Check the size of subsets where one coordinate is constant.
+        for key in ("id_b", "id_c", "id_d", "id_e"):
+            assert sum(1 for fk in product if fk[key] == 1) == 4**3
+
+        # Check the size of subsets where two coordinates are constant.
+        assert (
+            sum(1 for coord in product if coord["id_b"] == 2 and coord["id_c"] == 3)
+            == 4**2
+        )
+
+        # Ensure that every entry occurs at most once
+        assert len(set(tuple(v.values()) for v in product)) == 4**4

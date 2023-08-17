@@ -18,7 +18,7 @@ from typing import (
 
 from sqlalchemy import Column, Select, inspect, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
-from typing_extensions import Self, Unpack
+from typing_extensions import NotRequired, Self, Unpack
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
 # Constants
@@ -32,7 +32,6 @@ logger = logging.getLogger(__name__)
 
 Pks: TypeAlias = Dict[str, Dict[str, List[int]]]
 IterFks: TypeAlias = Generator[Dict[str, int], None, None]
-IterSelf: TypeAlias = Generator[Self, None, None]  # type: ignore
 
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
@@ -40,8 +39,8 @@ IterSelf: TypeAlias = Generator[Self, None, None]  # type: ignore
 
 
 class FksKwargs(TypedDict):
-    exclude_primary: bool
-    only_primary: bool
+    exclude_primary: NotRequired[bool]
+    only_primary: NotRequired[bool]
 
 
 class BaseDummyMeta:
@@ -74,10 +73,12 @@ class BaseDummyMeta:
         name = Table.__tablename__
         cls.tablenames.add(name)
 
-        i = inspect(Table)
-        cls.pks[name] = {p.name: p for p in i.primary_key}
+        table_details = inspect(Table)
+        cls.pks[name] = {p.name: p for p in table_details.primary_key}
         cls.fks[name] = {
-            name: column for name, column in i.columns.items() if column.foreign_keys
+            name: column
+            for name, column in table_details.columns.items()
+            if column.foreign_keys
         }
         cls.pknames.update(cls.pks[name].keys())
         cls.fknames.update(cls.fks[name].keys())
@@ -93,6 +94,8 @@ class DummyMixins:
 
     # ======================================================================= #
     # INTERNALS
+    #
+    # `__dunders__`
 
     __tablename__: ClassVar[str]
     __dummies__: ClassVar[BaseDummyMeta]
@@ -112,6 +115,9 @@ class DummyMixins:
             `InstrumentedAttribute`s.
         """
         f = cls.__dummies__.fks[cls.__tablename__]
+        bad = {k for k in kwargs if k not in FksKwargs.__required_keys__}
+        if len(bad):
+            raise ValueError(f"Illegal keyword arguments: `{bad}`.")
         match [
             kwargs.get("exclude_primary", False),
             kwargs.get("only_primary", False),
@@ -157,36 +163,12 @@ class DummyMixins:
 
     @classmethod
     def get_pk(cls, name: str) -> Column:
-        return cls.get_pks(name)
+        return cls.get_pks()[name]
 
     # ======================================================================= #
     # FOREIGN KEY AND PRIMARY FOREIGN KEY ITERATION.
     #
     # `create` prefixed methods and their helpers.
-
-    # TODO:
-    # @classmethod
-    # def create_iter_fks(
-    #     cls, pks: Pks, repeat: int = 1, primary: bool = False
-    # ) -> IterFks:  # type: ignore
-    #     """Because whe need values to put into foreign key values. These values
-    #     will be generated lazily.
-    #
-    #     There are three cases that this function should cover:
-    #
-    #     1. Iterate unique pairs of keys. This is for the case where a table has
-    #        primary keys that are also foreign keys.
-    #     2. Iterate non-unique pairs of keys. This could be where non-unique
-    #         foreign-keys should be generated.
-    #     3. A combination of the both of these.
-    #
-    #     :param Model: The model to iterate foreign key combinations forl
-    #     :param pks: A record of existing primary keys.
-    #     :param primary: Return keys as primary-foreign keys. This will
-    #         result in yielding of repeated results - the output is not unique.
-    #     """
-    #
-    #     ...
 
     @classmethod
     @overload
@@ -214,7 +196,7 @@ class DummyMixins:
         all_pks: None | Pks,
         /,
         **kwargs: Unpack[FksKwargs],
-    ) -> Dict[str, List[int] | Select]:
+    ) -> Dict[str, List[int]] | Dict[str, Select]:
         """Get a tables potential foreign keys and return them as a `dict` of
         lists when providing `all_pks`. Otherwise, return the queries that will
         generate `all_pks`. I cannot say which is more efficient.
@@ -232,7 +214,7 @@ class DummyMixins:
                 )
 
         fk_owners = cls.get_fk_owners(**kwargs)
-        fk_coproduct: Dict[str, Select | List[int]] = {
+        fk_coproduct: Dict[str, Select] | Dict[str, List[int]] = {
             name: select_fks(name, owner.__tablename__)  # type: ignore
             for name, owner in fk_owners.items()
         }
@@ -242,14 +224,46 @@ class DummyMixins:
     @classmethod
     def _create_iter_fks(
         cls,
-        coproduct: Dict[str, List[int]],
-        repeat: int = 1,
-    ):
+        all_pks: Pks,
+        **kwargs: Unpack[FksKwargs],
+    ) -> Generator[Dict[str, int], None, None]:
+        """Returns a generator of key/value mappings. This should expend all
+        values in the cartesian product of the foreign keys specfied by
+        :param:`kwargs`.
+
+        This should iter fks without adding repitions/randomness. Such
+        behavior should be placed in the consuming function.
+
+        :param kwargs: See :meth:`get_fks`.
+        """
+        coproduct = cls._create_coproduct(all_pks, **kwargs)
         yield from (
-            {key: coord for key, value in zip(coproduct, coord)}
-            for coord in itertools.product(coproduct.values())
-            for _ in range(repeat)
+            {key: value for key, value in zip(coproduct, coord)}
+            for coord in itertools.product(*coproduct.values())
         )
+
+    @classmethod
+    def create_iter_fks(cls, all_pks: Pks) -> IterFks:  # type: ignore
+        """Because whe need values to put into foreign key values. These values
+        will be generated lazily.
+
+        There are three cases that this function should cover:
+
+        1. Iterate unique pairs of keys. This is for the case where a table has
+           primary keys that are also foreign keys.
+        2. Iterate non-unique pairs of keys. This could be where non-unique
+            foreign-keys should be generated.
+        3. A combination of the both of these.
+
+        :param Model: The model to iterate foreign key combinations forl
+        :param pks: A record of existing primary keys.
+        :param primary: Return keys as primary-foreign keys. This will
+            result in yielding of repeated results - the output is not unique.
+        """
+
+        pk_fks = cls._create_iter_fks(all_pks, only_primary=True)
+        fks = cls._create_iter_fks(all_pks, exclude_primary=True)
+        ...
 
     # @classmethod
     # def createDummies(cls, table, pks: Pks) -> Generator[Self, None, None]:
