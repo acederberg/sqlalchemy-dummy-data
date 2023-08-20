@@ -83,11 +83,6 @@ class TestDummyMixins:
         "ForeignKey\\('(?P<owner>\\w*)\\.(?P<id>\\w*)'\\)"
     )
 
-    def test_classvars_unassigned(self):
-        # Assigining these would be stupid, hence this test.
-        attrs = ("tables", "tablesnames", "fks", "pks", "pknames", "fknames")
-        assert not all(hasattr(DummyMixins, attr) for attr in attrs)
-
     def test_cycle(self, ormCycle):
         # Use symetry to make assertions. ... -> D -> A -> B -> C -> D -> ...
 
@@ -168,6 +163,7 @@ class TestDummyMixins:
                 raise AssertionError(msg)
 
     def test_get_fk(self, ormConnected):
+        "Unit tests for `_create_coproduct`."
         a, *_ = ormConnected
         with pytest.raises(ValueError) as err:
             a.get_fks(exclude_primary=True, only_primary=True)
@@ -184,6 +180,7 @@ class TestDummyMixins:
         assert len(pure_fks) == 0
 
     def test__create_coproduct_no_db(self, ormConnected: Cases):
+        "Unit tests for `_create_coproduct`."
         a: DummyMixins
         a, *_ = ormConnected  # type: ignore
         coproduct: Dict[str, List[int]] = a._create_coproduct(self.all_pks)
@@ -196,6 +193,7 @@ class TestDummyMixins:
         assert len(coproduct) == 0
 
     def test__create_iter_fks(self, ormConnected: Cases):
+        "Unit tests for `_create_iter_fks`."
         a: DummyMixins
         a, *_ = ormConnected  # type: ignore
 

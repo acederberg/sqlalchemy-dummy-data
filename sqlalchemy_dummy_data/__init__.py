@@ -243,7 +243,103 @@ class DummyMixins:
         )
 
     @classmethod
-    def create_iter_fks(cls, all_pks: Pks) -> IterFks:  # type: ignore
+    def _create_iter_pks(
+        cls,
+        pks_lower_bounds: Optional[Dict[str, int]] = None,
+    ) -> Generator[Dict[str, int], None, None]:
+        """Iterates primary key values.
+
+        :param pks_lower_bounds: Lower bounds for the primary keys. By default
+            these will be set to zero. NOT SETTING THIS PROPERLY WILL RESULT
+            IN INTEGRITY ERRORS UPON INSERTION.
+
+        An Aside About A Sequence
+        -----------------------------------------------------------------------
+
+        Due to the case where a table has both foreign and domestic(?) primary
+        keys it is easiest to auto generate primary key values instead of auto
+        incrementing them. To avoiad creating primary keys where one part is
+        constant (where the primary key vectors all belong to some non-trivial
+        affine subspace) we have to ensure that these values are mixed nicely,
+        further we do not want to `zip` because then the foreign and domestic
+        parts of the keys increment 'together'.
+
+        For the following examples, all of the sets in question will be
+        countably infinite. This is a fine assumption until the primary keys
+        become very large.
+
+        As we can see from above, the `k`th diagonal of the product can be
+        iterated like `zip(range(1,k,1),range(k,1,-1))`.
+
+        .. code:: text
+            (1,1) (2,1) (3,1) (4,1) ...
+                  (2,2) (3,2) (4,2) ...
+                        (3,3) (4,3) ...
+                              (4,4) ...
+
+        Iterating columnwise and taking the permutations of each entry we can
+        iterate like
+
+        .. code:: python
+            def d2():
+                for k in range(1, 10):
+                    for j in range(1, k+1):
+                        yield from permutations(k, j+1)
+
+        A higher dimension product will be more work however, as we most prove
+        some generalization of this. This is reasonable to do using induction.
+        In the case of three dimensions we can enumerate the possible sets for
+        permutation as
+
+        .. code:: text
+            (*(1,1),1) (*(1,1),2) (*(1,1),3) (*(1,1),4)
+                       (*(2,1),2) (*(2,1),3) (*(2,1),4)
+                                  (*(2,2),3) (*(2,2),4)
+                                             (*(3,1),4)
+
+        and
+
+        .. code:: python
+            def d3():
+                for coord in d2():
+                    for l in range(1, j+1):
+                        yield from permutations(*coord, l)
+
+        More formally the propisition is the following: *In the set of all
+        tuples of some fixed size there exists a unique subset (the 'triangle')
+        such that:*
+
+        1. *Permutations are equal to the entire space.*
+        2. *The intersection between equivalence classes of the permutations
+           is always empty.*
+        3. If length is defined and is some integer `n`, the sequence has
+           length `(n+1)*(n^(k-1))/2`.
+
+        This only acually works in the case that all of the products are the
+        same, so then we will use the minimum of the provided bounds as a
+        subset of the potential primary keys is more than enough.
+
+        Item **3** is easy to prove by using gauses summation formula to
+        determine the size of the initial triangle. The remaining cases
+        actually just look like products of the initial triangle and the set
+        who makes the coproduct some number of times. In the case the the
+        elements of the product have different lengths **3** should be useful
+        for computing upper and lower bounds.
+
+
+        """
+
+        pks = set(cls.get_pks())
+        if pks_lower_bounds is None:
+            pks_lower_bounds = {pk: 0 for pk in pks}
+
+        pks_lower_bounds.update({pk: 1 for pk in pks if pk not in pks_lower_bounds})
+
+        while True:
+            yield None
+
+    @classmethod
+    def create_iter_fks(cls, all_pks: Pks) -> IterFks:
         """Because whe need values to put into foreign key values. These values
         will be generated lazily.
 
@@ -261,9 +357,16 @@ class DummyMixins:
             result in yielding of repeated results - the output is not unique.
         """
 
+        # These can be large, keep them as generators for lower memory use.
+        # What about cases where the foreign primary keys do not form the
+        # entire primary key but only a part of it.
         pk_fks = cls._create_iter_fks(all_pks, only_primary=True)
         fks = cls._create_iter_fks(all_pks, exclude_primary=True)
-        ...
+        pks = cls.get_pks()
+
+        while (pk := next(pks)) is not None and (fk := next(pks)) is not None:
+            pk_fk = next(pk_fks)
+            yield dict(**pk_fk, **fk)
 
     # @classmethod
     # def createDummies(cls, table, pks: Pks) -> Generator[Self, None, None]:
