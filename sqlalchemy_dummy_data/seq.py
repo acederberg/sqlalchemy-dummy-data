@@ -1,5 +1,20 @@
 import itertools
-from typing import Dict, Generator, Iterable, List, Optional, Sequence, Tuple
+from typing import (
+    Callable,
+    Concatenate,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Protocol,
+    Sequence,
+    Tuple,
+    TypeAlias,
+    TypedDict,
+)
+
+from typing_extensions import NotRequired, ParamSpec, TypeVarTuple, Unpack
 
 
 def unique_permutations(
@@ -14,6 +29,11 @@ def unique_permutations(
             remaining_elements.remove(first_element)
             for sub_permutation in unique_permutations(remaining_elements):
                 yield (first_element, *sub_permutation)
+
+
+class KwargsSequencer(TypedDict):
+    start: NotRequired[Optional[int]]
+    stop: NotRequired[Optional[int]]
 
 
 class iters:
@@ -37,7 +57,7 @@ class iters:
         while True:
             yield k
             if stop is not None and k >= stop:
-                continue
+                break
             k += 1
 
     @classmethod
@@ -51,6 +71,7 @@ class iters:
         :param items: The things to make the product from.
         :returns: See function description.
         """
+
         n = len(items)
         if not n:
             raise ValueError("Arguments must have length of 1 or greater.")
@@ -61,25 +82,68 @@ class iters:
         last_item: Iterable[int]
         remaining_items: List[Iterable[int]]
         last_item, *remaining_items = items
-        for last in last_item:
-            for item in cls._triangled(*remaining_items):
-                if item[-1] <= last:
-                    yield (*item, last)
+        for item in cls._triangled(*remaining_items):
+            for last in last_item:
+                if item[0] >= last:
+                    yield (last, *item)
 
     @classmethod
     def _squared(cls, *items: Iterable):
         for item in cls._triangled(*items):
-            yield from unique_permutations(item)
+            yield from set(itertools.permutations(item))
 
     @classmethod
     def triangled(
         cls,
         *labels,
-        start: Optional[int] = None,
-        stop: Optional[int] = None,
+        **kwargs: Unpack[KwargsSequencer],
     ) -> Iterable[Dict[str, int]]:
-        counters = {label: cls.count(start, stop) for label in labels}
+        counters = {label: cls.count(**kwargs) for label in labels}
         yield from (
             {k: v for k, v in zip(counters, coord)}
             for coord in cls._triangled(*counters.values())
         )
+
+    @classmethod
+    def squared(
+        cls, *labels, **kwargs: Unpack[KwargsSequencer]
+    ) -> Iterable[Dict[str, int]]:
+        counters = {label: cls.count(**kwargs) for label in labels}
+        yield from (
+            {k: v for k, v in zip(counters, coord)}
+            for coord in cls._squared(*counters.values())
+        )
+
+
+# =========================================================================== #
+# TYPING GARBAGE
+#
+# For now I have to use a stupid protocol. Read more about typing novelties:
+#
+# https://peps.python.org/pep-0677/
+# https://peps.python.org/pep-0612/
+
+
+class SequencerCallable(Protocol):
+    # stop: Optional[int] = None,
+    # start: Optional[int] = None,
+    def __call__(
+        self, *labels: str, **KwargsSequencer: Unpack[KwargsSequencer]
+    ) -> Iterable[Dict[str, int]]:
+        ...
+
+
+def test(fn: Optional[SequencerCallable] = None) -> None:
+    # Proof of concept
+
+    if fn is None:
+        fn = iters.squared
+    assert fn
+    fn("idClient", "idThing", start=2)
+
+    # MyPy should complain.
+    # bar: SequencerCallable = int
+
+
+if __name__ == "__main__":
+    print(tuple(iters._triangled(range(3), range(3), range(3))))
