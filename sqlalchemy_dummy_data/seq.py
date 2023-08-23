@@ -1,39 +1,77 @@
+"""Tools to solve the 'monotonic sequencing problem'. That is, given some
+primary keys, the sequences easiest to generate tend to be constant in most
+dimensions which results in data where relationships are concentrated in some
+small subset of the entire data. In my opinion, this is less than desirable.
+
+An example of that discussed above would be where a table `T` has the foreign
+keys `a` and `b` and the available keys `X = set(range(10))`. If we use 
+`itertools.product(X, X)` but only generate 10 entries in `T` then all of the 
+new entries will have `a == 1`.
+"""
+
 import itertools
-from typing import (
-    Callable,
-    Concatenate,
-    Dict,
-    Generator,
-    Iterable,
-    List,
-    Optional,
-    Protocol,
-    Sequence,
-    Tuple,
-    TypeAlias,
-    TypedDict,
-)
+from typing import Dict, Generator, Iterable, List, Optional, Protocol, Tuple, TypedDict
 
-from typing_extensions import NotRequired, ParamSpec, TypeVarTuple, Unpack
+from typing_extensions import NotRequired, Unpack
 
-
-def unique_permutations(
-    elements: Sequence,
-) -> Generator[Tuple[int, ...], None, None,]:
-    if len(elements) == 1:
-        yield (elements[0],)
-    else:
-        unique_elements = set(elements)
-        for first_element in unique_elements:
-            remaining_elements = list(elements)
-            remaining_elements.remove(first_element)
-            for sub_permutation in unique_permutations(remaining_elements):
-                yield (first_element, *sub_permutation)
+# =========================================================================== #
+# TYPING GARBAGE
+#
+# For now I have to use a stupid protocol. Read more about typing novelties:
+#
+# https://peps.python.org/pep-0677/
+# https://peps.python.org/pep-0612/
 
 
 class KwargsSequencer(TypedDict):
+    """Keyword arguments that sequencers must ac`cept.
+
+    :attr start: Least integer to iterate.
+    :attr stop: Greatest integer to iterate.
+    """
+
     start: NotRequired[Optional[int]]
     stop: NotRequired[Optional[int]]
+
+
+class SequencerCallable(Protocol):
+    """Call sigature for so-called 'sequencer'.
+
+    It should work like the following:
+
+    .. code:: python
+        def test(fn: Optional[SequencerCallable] = None) -> None:
+            # Proof of concept
+
+            if fn is None:
+                fn = iters.squared
+            assert fn
+            fn("idClient", "idThing", start=2)
+
+            # MyPy should complain.
+            # bar: SequencerCallable = int
+    """
+
+    def __call__(
+        self, *labels: str, **kwargs: Unpack[KwargsSequencer]
+    ) -> Iterable[Dict[str, int]]:
+        """Call sigature for so-called 'sequencer'.
+
+        Sequencers are used to 'mix up' the available primary/foreign keys such
+        that data is not 'to similar'.
+
+        :param labels: Names of the primary keys. Determines the dimension of
+            the sequence. Labels output of the sequence.
+        :param kwargs: Keyword arguments for sequencers. For complete details,
+            see :class:`KwargsSequencer`s documentation.
+        :returns: An iterable (ideally a generator) returning dictionaries of
+            sequence members as labeled by their respective :param:`labels`.
+        """
+        ...
+
+
+# =========================================================================== #
+# Sequencers
 
 
 class iters:
@@ -41,7 +79,7 @@ class iters:
     def count(
         cls, start: Optional[int] = None, stop: Optional[int] = None
     ) -> Generator[int, None, None]:
-        """Sould 'work like' range except with indefinite iteration.
+        """Sould 'work like' range except with optional indefinite iteration.
 
         :param start: 1 if not overridden.
         :param stop: Iteration will terminate at this value if specified.
@@ -64,9 +102,9 @@ class iters:
     def _triangled(
         cls, *items: Iterable[int]
     ) -> Generator[Tuple[int, ...], None, None]:
-        """Iterate the members of the product of the items such that they act
-        like the sequenct described in :meth:`DummyMixins._create_iter_pks`
-        when :param:`items` is made of similar items.
+        """Generate the sequence defined by the upper triangle of the product
+        iterated columnwise (in the 2d case) or the higher dimensional
+        analogues of this.
 
         :param items: The things to make the product from.
         :returns: See function description.
@@ -88,16 +126,28 @@ class iters:
                     yield (last, *item)
 
     @classmethod
-    def _squared(cls, *items: Iterable):
+    def _squared(
+        cls,
+        *items: Iterable,
+    ) -> Generator[Tuple[int, ...], None, None]:
+        """Like :meth:`_triangled` but with reflections by permutation.
+
+        :param items: See :meth:`_triangled`.
+        :returns: See function description.
+        """
         for item in cls._triangled(*items):
             yield from set(itertools.permutations(item))
 
     @classmethod
     def triangled(
         cls,
-        *labels,
+        *labels: str,
         **kwargs: Unpack[KwargsSequencer],
-    ) -> Iterable[Dict[str, int]]:
+    ) -> Generator[Dict[str, int], None, None]:
+        """See documentation of :meth:`_triangled` for a description of
+        sequence members and :class:`SequencerCallable` for parameter
+        descriptions.
+        """
         counters = {label: cls.count(**kwargs) for label in labels}
         yield from (
             {k: v for k, v in zip(counters, coord)}
@@ -106,44 +156,14 @@ class iters:
 
     @classmethod
     def squared(
-        cls, *labels, **kwargs: Unpack[KwargsSequencer]
-    ) -> Iterable[Dict[str, int]]:
+        cls, *labels: str, **kwargs: Unpack[KwargsSequencer]
+    ) -> Generator[Dict[str, int], None, None]:
+        """See documentation of :meth:`_triangled` for a description of
+        sequence members and :class:`SequencerCallable` for parameter
+        descriptions.
+        """
         counters = {label: cls.count(**kwargs) for label in labels}
         yield from (
             {k: v for k, v in zip(counters, coord)}
             for coord in cls._squared(*counters.values())
         )
-
-
-# =========================================================================== #
-# TYPING GARBAGE
-#
-# For now I have to use a stupid protocol. Read more about typing novelties:
-#
-# https://peps.python.org/pep-0677/
-# https://peps.python.org/pep-0612/
-
-
-class SequencerCallable(Protocol):
-    # stop: Optional[int] = None,
-    # start: Optional[int] = None,
-    def __call__(
-        self, *labels: str, **KwargsSequencer: Unpack[KwargsSequencer]
-    ) -> Iterable[Dict[str, int]]:
-        ...
-
-
-def test(fn: Optional[SequencerCallable] = None) -> None:
-    # Proof of concept
-
-    if fn is None:
-        fn = iters.squared
-    assert fn
-    fn("idClient", "idThing", start=2)
-
-    # MyPy should complain.
-    # bar: SequencerCallable = int
-
-
-if __name__ == "__main__":
-    print(tuple(iters._triangled(range(3), range(3), range(3))))

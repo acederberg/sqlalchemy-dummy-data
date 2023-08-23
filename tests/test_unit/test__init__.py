@@ -8,8 +8,8 @@ from sqlalchemy import Column
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from sqlalchemy_dummy_data import DummyMixins, Pks
 
-from .assets import Assets
-from .cases import Cases
+from ..assets import Assets
+from ..cases import Cases
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,6 @@ class TestCases:
         bad = tuple(t for t in tables if hasattr(t, attr) != expect)
 
         if len(bad):
-            print(hasattr(tables[0], "get_fks"), expect)
             msg = "\n".join(f"-  {b.__name__}" for b in bad)
             msg = f"The following tables were {{0}}missing `get_fks`: \n{msg}"
             raise AssertionError(msg.format("not " if not expect else ""))
@@ -101,7 +100,6 @@ class TestDummyMixins:
             assert isinstance(id_parent, Column)
             matched = self.pattern_owner.search(repr(id_parent))
             if matched is None:
-                print("1", repr(fks["id_parent"]))
                 msg = "Could not find anything to match `{0}`."
                 raise AssertionError(msg.format(self.pattern_owner.pattern))
             owner = matched.group("owner")
@@ -196,6 +194,11 @@ class TestDummyMixins:
         "Unit tests for `_create_iter_fks`."
         a: DummyMixins
         a, *_ = ormConnected  # type: ignore
+
+        # Check kwargs err
+        with pytest.raises(ValueError) as err:
+            set(a._create_iter_fks(self.all_pks, only_primary=True, start=1, stop=3))
+        assert "Cannot specify both" in str(err.value)
 
         # Check the size of the entire product.
         product = tuple(a._create_iter_fks(self.all_pks, only_primary=True))

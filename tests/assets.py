@@ -1,3 +1,9 @@
+"""Assets loading.
+
+:const PATH_ROOT: Path to the project root.
+:const PATH_TESTS: Path to the project tests.
+:const PATH_ASSETS: Path to the project test assets.
+"""
 import json
 from os import path
 from typing import Any
@@ -10,6 +16,13 @@ PATH_ASSETS = path.join(PATH_TESTS, "assets")
 
 
 class Assets:
+    """Load files from assets.
+
+    :meth asset: Create path to an asset.
+    :meth yaml: Load a yaml asset.
+    :meth json: Load a json asset.
+    """
+
     @classmethod
     def asset(cls, name: str) -> str:
         return path.join(PATH_ASSETS, name)
