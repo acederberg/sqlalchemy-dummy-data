@@ -75,6 +75,43 @@ class SequencerCallable(Protocol):
 
 
 class iters:
+    '''
+    @classmethod
+    def _triangled_b4(
+        cls, *items: Iterable[int]
+    ) -> Generator[Tuple[int, ...], None, None]:
+        """Generate the sequence defined by the upper triangle of the product
+        iterated columnwise (in the 2d case) or the higher dimensional
+        analogues of this.
+
+        :param items: The things to make the product from.
+        :returns: See function description.
+        """
+
+        print("items", items)
+        n = len(items)
+        if not n:
+            raise ValueError("Arguments must have length of 1 or greater.")
+        elif n == 1:
+            yield from ((item,) for item in items[0])
+            return
+
+        first_item: Iterable[int]
+        remaining_items: List[Iterable[int]]
+        first_item, *remaining_items = items
+        first_item = set(first_item)
+
+        print("==============================================================")
+        print("remaining_items", remaining_items)
+        for item in cls._triangled_b4(*remaining_items):
+            print("----------------------------------------------------------")
+            print("item", item)
+            for first in first_item:
+                print("first", first)
+                if item[-1] <= first:
+                    yield (*item, first)
+    '''
+
     @classmethod
     def count(
         cls, start: Optional[int] = None, stop: Optional[int] = None
@@ -100,7 +137,7 @@ class iters:
 
     @classmethod
     def _triangled(
-        cls, *items: Iterable[int]
+        cls, n: int, *, stop: Optional[int] = None, start: Optional[int] = 1
     ) -> Generator[Tuple[int, ...], None, None]:
         """Generate the sequence defined by the upper triangle of the product
         iterated columnwise (in the 2d case) or the higher dimensional
@@ -110,32 +147,27 @@ class iters:
         :returns: See function description.
         """
 
-        n = len(items)
         if not n:
             raise ValueError("Arguments must have length of 1 or greater.")
         elif n == 1:
-            yield from ((item,) for item in items[0])
+            yield from ((item,) for item in cls.count(start, stop))
             return
 
-        last_item: Iterable[int]
-        remaining_items: List[Iterable[int]]
-        last_item, *remaining_items = items
-        for item in cls._triangled(*remaining_items):
-            for last in last_item:
-                if item[0] >= last:
-                    yield (last, *item)
+        for coord in cls._triangled(n - 1, start=start, stop=stop):
+            for ext in cls.count(start, stop):
+                if coord[-1] >= ext:
+                    yield (ext, *coord)
 
     @classmethod
     def _squared(
-        cls,
-        *items: Iterable,
+        cls, n: int, *, start: Optional[int] = 1, stop: Optional[int] = None
     ) -> Generator[Tuple[int, ...], None, None]:
         """Like :meth:`_triangled` but with reflections by permutation.
 
         :param items: See :meth:`_triangled`.
         :returns: See function description.
         """
-        for item in cls._triangled(*items):
+        for item in cls._triangled(n, start=start, stop=stop):
             yield from set(itertools.permutations(item))
 
     @classmethod
@@ -151,7 +183,7 @@ class iters:
         counters = {label: cls.count(**kwargs) for label in labels}
         yield from (
             {k: v for k, v in zip(counters, coord)}
-            for coord in cls._triangled(*counters.values())
+            for coord in cls._triangled(len(labels), **kwargs)
         )
 
     @classmethod
@@ -165,5 +197,5 @@ class iters:
         counters = {label: cls.count(**kwargs) for label in labels}
         yield from (
             {k: v for k, v in zip(counters, coord)}
-            for coord in cls._squared(*counters.values())
+            for coord in cls._squared(len(labels), **kwargs)
         )

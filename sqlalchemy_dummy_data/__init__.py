@@ -7,6 +7,7 @@ from typing import (
     ClassVar,
     Dict,
     Generator,
+    Iterable,
     List,
     Optional,
     Set,
@@ -19,6 +20,8 @@ from typing import (
 from sqlalchemy import Column, Select, inspect, select
 from sqlalchemy.orm import DeclarativeMeta, InstrumentedAttribute
 from typing_extensions import NotRequired, Self, Unpack
+
+from sqlalchemy_dummy_data.seq import KwargsSequencer, SequencerCallable, iters
 
 # %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% #
 # Constants
@@ -38,9 +41,13 @@ IterFks: TypeAlias = Generator[Dict[str, int], None, None]
 # Definitions that should not be used directly by consumers in most cases.
 
 
-class FksKwargs(TypedDict):
+class KwargsFks(TypedDict):
     exclude_primary: NotRequired[bool]
     only_primary: NotRequired[bool]
+
+
+class KwargsIterFks(KwargsFks, KwargsSequencer):
+    ...
 
 
 class BaseDummyMeta:
@@ -106,7 +113,7 @@ class DummyMixins:
     # `get` prefixed methods.
 
     @classmethod
-    def get_fks(cls, **kwargs: Unpack[FksKwargs]) -> Dict[str, Column]:
+    def get_fks(cls, **kwargs: Unpack[KwargsFks]) -> Dict[str, Column]:
         """Get the foreign keys for `cls`.
 
         :param exclude_primary: When `True`, only return foreign keys that are
@@ -115,9 +122,6 @@ class DummyMixins:
             `InstrumentedAttribute`s.
         """
         f = cls.__dummies__.fks[cls.__tablename__]
-        bad = {k for k in kwargs if k not in FksKwargs.__required_keys__}
-        if len(bad):
-            raise ValueError(f"Illegal keyword arguments: `{bad}`.")
         match [
             kwargs.get("exclude_primary", False),
             kwargs.get("only_primary", False),
@@ -137,7 +141,7 @@ class DummyMixins:
 
     @classmethod
     def get_fk_owners(
-        cls, **kwargs: Unpack[FksKwargs]
+        cls, **kwargs: Unpack[KwargsFks]
     ) -> Dict[str, DeclarativeMeta | Self]:
         """Get owners of the various foreign keys.
 
@@ -176,7 +180,7 @@ class DummyMixins:
         cls,
         all_pks: None,
         /,
-        **kwargs: Unpack[FksKwargs],
+        **kwargs: Unpack[KwargsFks],
     ) -> Dict[str, Select]:
         ...
 
@@ -186,7 +190,7 @@ class DummyMixins:
         cls,
         all_pks: Pks,
         /,
-        **kwargs: Unpack[FksKwargs],
+        **kwargs: Unpack[KwargsFks],
     ) -> Dict[str, List[int]]:
         ...
 
@@ -195,7 +199,7 @@ class DummyMixins:
         cls,
         all_pks: None | Pks,
         /,
-        **kwargs: Unpack[FksKwargs],
+        **kwargs: Unpack[KwargsFks],
     ) -> Dict[str, List[int]] | Dict[str, Select]:
         """Get a tables potential foreign keys and return them as a `dict` of
         lists when providing `all_pks`. Otherwise, return the queries that will
@@ -224,8 +228,9 @@ class DummyMixins:
     @classmethod
     def _create_iter_fks(
         cls,
-        all_pks: Pks,
-        **kwargs: Unpack[FksKwargs],
+        all_pks: Optional[Pks],
+        sequencer: Optional[SequencerCallable] = None,
+        **kwargs: Unpack[KwargsIterFks],
     ) -> Generator[Dict[str, int], None, None]:
         """Returns a generator of key/value mappings. This should expend all
         values in the cartesian product of the foreign keys specfied by
@@ -236,24 +241,43 @@ class DummyMixins:
 
         :param kwargs: See :meth:`get_fks`.
         """
+
+        skwargs: KwargsSequencer
+
+        if all_pks is not None:
+            if "start" in kwargs or "stop" in kwargs:
+                msg = "Cannot specify both `all_pks` and `start` or `stop`."
+                raise ValueError(msg)
+            X = all_pks[cls.__tablename__].values()
+            skwargs = KwargsSequencer(
+                start=max(min(x) for x in X),
+                stop=min(max(x) for x in X),
+            )
+        else:
+            skwargs = KwargsSequencer(
+                {  # type: ignore
+                    key: value
+                    for key in ("start", "stop")
+                    if (value := kwargs.pop(key, None)) is not None
+                }
+            )
+
+        if sequencer is None:
+            sequencer = iters.squared
+
         coproduct = cls._create_coproduct(all_pks, **kwargs)
-        yield from (
-            {key: value for key, value in zip(coproduct, coord)}
-            for coord in itertools.product(*coproduct.values())
-        )
+        yield from sequencer(*coproduct, **skwargs)
 
     @classmethod
     def _create_iter_pks(
         cls,
-        pks_lower_bounds: Optional[Dict[str, int]] = None,
+        all_pks: Optional[Pks],
+        sequencer: Optional[SequencerCallable] = iters.squared,
+        **kwargs: Unpack[KwargsSequencer],
     ) -> Generator[Dict[str, int], None, None]:
         """Iterates primary key values.
 
-        :param pks_lower_bounds: Lower bounds for the primary keys. By default
-            these will be set to zero. NOT SETTING THIS PROPERLY WILL RESULT
-            IN INTEGRITY ERRORS UPON INSERTION.
-
-        An Aside About A Sequence
+        An Aside About The Sequence
         -----------------------------------------------------------------------
 
         Due to the case where a table has both foreign and domestic(?) primary
@@ -264,79 +288,24 @@ class DummyMixins:
         further we do not want to `zip` because then the foreign and domestic
         parts of the keys increment 'together'.
 
-        For the following examples, all of the sets in question will be
-        countably infinite. This is a fine assumption until the primary keys
-        become very large.
-
-        As we can see from above, the `k`th diagonal of the product can be
-        iterated like `zip(range(1,k,1),range(k,1,-1))`.
-
-        .. code:: text
-            (1,1) (2,1) (3,1) (4,1) ...
-                  (2,2) (3,2) (4,2) ...
-                        (3,3) (4,3) ...
-                              (4,4) ...
-
-        Iterating columnwise and taking the permutations of each entry we can
-        iterate like
-
-        .. code:: python
-            def d2():
-                for k in range(1, 10):
-                    for j in range(1, k+1):
-                        yield from permutations(k, j+1)
-
-        A higher dimension product will be more work however, as we most prove
-        some generalization of this. This is reasonable to do using induction.
-        In the case of three dimensions we can enumerate the possible sets for
-        permutation as
-
-        .. code:: text
-            (*(1,1),1) (*(1,1),2) (*(1,1),3) (*(1,1),4)
-                       (*(2,1),2) (*(2,1),3) (*(2,1),4)
-                                  (*(2,2),3) (*(2,2),4)
-                                             (*(3,1),4)
-
-        and
-
-        .. code:: python
-            def d3():
-                for coord in d2():
-                    for l in range(1, j+1):
-                        yield from permutations(*coord, l)
-
-        More formally the propisition is the following: *In the set of all
-        tuples of some fixed size there exists a unique subset (the 'triangle')
-        such that:*
-
-        1. *Permutations are equal to the entire space.*
-        2. *The intersection between equivalence classes of the permutations
-           is always empty.*
-        3. If length is defined and is some integer `n`, the sequence has
-           length `(n+1)*(n^(k-1))/2`.
-
-        This only acually works in the case that all of the products are the
-        same, so then we will use the minimum of the provided bounds as a
-        subset of the potential primary keys is more than enough.
-
-        Item **3** is easy to prove by using gauses summation formula to
-        determine the size of the initial triangle. The remaining cases
-        actually just look like products of the initial triangle and the set
-        who makes the coproduct some number of times. In the case the the
-        elements of the product have different lengths **3** should be useful
-        for computing upper and lower bounds.
-
-
+        Finally, I'd like to be able to switch out the algorithm to do this as
+        well as apply this in :meth:`create_iter_fks`. Ideally these sequences
+        will be somewhat randomized.
         """
 
-        pks = set(cls.get_pks())
-        if pks_lower_bounds is None:
-            pks_lower_bounds = {pk: 0 for pk in pks}
+        if all_pks is not None:
+            if "start" in kwargs:
+                raise ValueError("Cannot specify both `all_pks` and `start`.")
+            else:
+                kwargs["start"] = max(
+                    max(thing) for thing in all_pks[cls.__tablename__].values()
+                )
 
-        pks_lower_bounds.update({pk: 1 for pk in pks if pk not in pks_lower_bounds})
+        if sequencer is None:
+            sequencer = iters.squared
 
-        while True:
-            yield None
+        pks = cls.get_pks()
+        yield from sequencer(*pks, **kwargs)
 
     @classmethod
     def create_iter_fks(cls, all_pks: Pks) -> IterFks:
@@ -362,11 +331,15 @@ class DummyMixins:
         # entire primary key but only a part of it.
         pk_fks = cls._create_iter_fks(all_pks, only_primary=True)
         fks = cls._create_iter_fks(all_pks, exclude_primary=True)
-        pks = cls.get_pks()
+        pks = cls._create_iter_pks(all_pks)
 
-        while (pk := next(pks)) is not None and (fk := next(pks)) is not None:
+        while (
+            (pk := next(pks)) is not None
+            and (fk := next(fks)) is not None
+            and (pk_fk := next(pk_fks)) is not None
+        ):
             pk_fk = next(pk_fks)
-            yield dict(**pk_fk, **fk)
+            yield dict(**pk_fk, **fk, **pk)
 
     # @classmethod
     # def createDummies(cls, table, pks: Pks) -> Generator[Self, None, None]:
