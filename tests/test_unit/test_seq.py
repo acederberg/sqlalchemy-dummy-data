@@ -18,7 +18,6 @@ class Test:
         # This test may be slow. The results will be used lazily.
         for k in range(3, 8):
             d3 = tuple(iters._squared(k, start=1, stop=3))
-            e3 = tuple(iters._triangled(k, start=1, stop=3))
             assert len(set(d3)) == len(d3)
 
     def test_triangled(self):

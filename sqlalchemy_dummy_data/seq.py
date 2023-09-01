@@ -154,9 +154,8 @@ class iters:
             return
 
         for coord in cls._triangled(n - 1, start=start, stop=stop):
-            for ext in cls.count(start, stop):
-                if coord[-1] >= ext:
-                    yield (ext, *coord)
+            for ext in cls.count(start, coord[0]):
+                yield (ext, *coord)
 
     @classmethod
     def _squared(
