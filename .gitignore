@@ -3,3 +3,4 @@ sqlalchemy-dummies
 env
 __pycache__
 temp.*
+tests.yaml

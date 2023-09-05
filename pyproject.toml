@@ -58,7 +58,10 @@ dev = [
 	"isort"
 ]
 test = [
+    "docker",
 	"pytest",
+  "pydantic>=2",
+  "yaml-settings-pydantic>=2",
 ]
 
 
