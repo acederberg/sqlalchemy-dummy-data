@@ -3,9 +3,10 @@
 Do not add logging in here besides in `WithTyper`. Functions should be simple 
 enough that they do not require logging.
 """
+import asyncio
 import json
 import logging
-from typing import Annotated, List
+from typing import Annotated, Iterable, List
 
 import docker
 import typer
@@ -71,6 +72,10 @@ class WithTyper(type):
             )
 
 
+OServerIds = Annotated[None | List[str], typer.Option()]
+OForce = Annotated[bool, typer.Option()]
+
+
 class CommandsDocker(metaclass=WithTyper):
     __subcommand__ = "docker"
 
@@ -80,14 +85,24 @@ class CommandsDocker(metaclass=WithTyper):
         config.servers.clean(DOCKER_CLIENT)
 
     @classmethod
-    def start(cls):
-        print("Starting docker containers.")
-        config.servers.start(DOCKER_CLIENT)
+    def start(cls, server_ids: OServerIds = None):
+        print("Starting all docker containers.")
+        task = config.servers.start(
+            DOCKER_CLIENT,
+            server_ids=server_ids,
+        )
+        asyncio.run(task)
 
     @classmethod
-    def stop(cls):
+    def stop(cls, server_ids: OServerIds = None, force: OForce = False):
         print("Stopping docker containers")
-        config.servers.start(DOCKER_CLIENT)
+        asyncio.run(
+            config.servers.stop(
+                DOCKER_CLIENT,
+                server_ids=server_ids,
+                force=force,
+            )
+        )
 
 
 class CommandsConfig(metaclass=WithTyper):
@@ -108,6 +123,9 @@ class CommandsConfig(metaclass=WithTyper):
                                 "index non-list."
                             )
                             raise typer.Exit(2)
+                    elif q == "*":
+                        print("`*` expressions are not yet supported.")
+                        typer.Exit(3)
                     else:
                         thing = getattr(thing, q)
                 except (KeyError, IndexError, AttributeError):
@@ -115,11 +133,19 @@ class CommandsConfig(metaclass=WithTyper):
                     raise typer.Exit(1)
 
         print("Interpretted configuration:")
-        if isinstance(thing, list):
-            out = [t.model_dump() for t in thing]  # type: ignore
-            print(json.dumps(out, indent=2))
+        if isinstance(thing, Iterable):
+            out = [t.model_dump() if hasattr(t, "model_dump") else t for t in thing]  # type: ignore
+            print(json.dumps(out, indent=2, default=str))
+        elif isinstance(thing, dict):
+            print(json.dumps(thing, indent=2, default=str))
         else:
-            print(json.dumps(thing.model_dump(), indent=2))
+            print(
+                json.dumps(
+                    thing.model_dump() if hasattr(thing, "model_dump") else thing,
+                    indent=2,
+                    default=str,
+                )
+            )
 
 
 class Commands(metaclass=WithTyper):

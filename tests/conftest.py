@@ -2,19 +2,36 @@
 
 Includes docker tools for running tests against multiple SQL flavors.
 """
+import asyncio
+import functools
 import logging
+import typing
 from os import path
-from typing import Any, Callable, Dict, Generator, Iterable, List, Optional
+from typing import (
+    Any,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Dict,
+    Generator,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    TypeAlias,
+    TypeVar,
+)
 from uuid import uuid4
 
 import docker
 import pytest
+import typing_extensions
 from docker.models.containers import Container as DockerContainer
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.engine import URL
 from sqlalchemy.engine import Engine as SQAEngine
 from sqlalchemy.engine import create_engine
-from typing_extensions import ParamSpec
+from typing_extensions import ParamSpec, Self
 from yaml_settings_pydantic import BaseYamlSettings
 
 from .cases import ormCases, ormConnected, ormCycle, ormDecl, ormManyMany
@@ -31,6 +48,19 @@ def ubuv(fn: str) -> str:
     return path.realpath(path.join(path.dirname(__file__), "..", fn))
 
 
+T = ParamSpec("T")
+S = TypeVar("S")
+
+
+def asyncronize(fn: Callable[T, S]) -> Callable[T, Coroutine[Any, Any, S]]:
+    async def wrapper(*args: T.args, **kwargs: T.kwargs):
+        loop = asyncio.get_event_loop()
+        p = functools.partial(fn, *args, **kwargs)
+        return await loop.run_in_executor(None, p)
+
+    return wrapper
+
+
 # =========================================================================== #
 # Configuration
 
@@ -44,7 +74,7 @@ class Config(BaseYamlSettings):
     :attr servers: Configuration for the various servers.
     """
 
-    __env_yaml_settings_files__ = ubuv("tests.yaml")
+    __yaml_files__ = ubuv("tests.yaml")
 
     class Servers(BaseModel):
         """Configurations for the various servers to run tests on.
@@ -168,6 +198,7 @@ class Config(BaseYamlSettings):
                     None,
                 )
 
+            @asyncronize
             def start(self, client: docker.DockerClient) -> SQAEngine:
                 """Start the container associated with this configuration.
 
@@ -198,61 +229,84 @@ class Config(BaseYamlSettings):
                 if container.status != "running":
                     logger.debug(
                         "Container `%s` exists but is not running."
-                        "Attempting to start.",
+                        " Attempting to start.",
                         name,
                     )
                     container.start()
 
+                    """
                     if container.status != "running":
                         print(container.logs())
                         raise AssertionError(f"Failed to restart `{name}`.")
+                    """
 
                 return self.engine()
 
-            def stop(self, client: docker.DockerClient) -> None:
+            @asyncronize
+            def stop(self, client: docker.DockerClient, force: bool = False) -> None:
                 """Stop the container associated with this configuration.
 
                 :param client: A ``docker.DockerClient`` instance.
                 """
                 name = self.container_name()
-                if self.get(client):
-                    logger.debug(
-                        "Not keeping container `%s`.",
-                        name,
-                    )
-                    client.container.stop(name)
-
-                logger.debug("Keeping container `%s`.", name)
-                return
+                if container := self.get(client):
+                    if force:
+                        logger.debug(
+                            "Not keeping container `%s`.",
+                            name,
+                        )
+                        container.stop()
+                    else:
+                        logger.debug("Keeping container `%s`.", name)
+                else:
+                    logger.debug("No container `%s`, cannot remove.", name)
 
             driver: Optional[str] = None
             dialect: str = "mysql"
             host: Host
             container: Container
+            id: str
 
-        def start(self, client: docker.DockerClient) -> List[SQAEngine]:
+        async def start(
+            self,
+            client: docker.DockerClient,
+            server_ids: Optional[Iterable[str]] = None,
+        ) -> List[SQAEngine]:
             """Start the SQL docker containers for testing against various SQL
             dialects.
 
             :param client: A ``docker.DockerClient`` instance.
+            :param server_ids: Containers as identified by `Container.id`. This
+                is not the docker container id.
             :returns: All engines for te various mysql instances.
             """
             logger.info("Starting test containers.")
-            servers = list(s.start(client) for s in self.servers)
+            if not server_ids:
+                server_ids = self.servers_included
+            tasks = (s.start(client) for s in self.servers if s.id in server_ids)
+            servers = await asyncio.gather(*tasks)
             return servers
 
-        def stop(self, client: docker.DockerClient) -> None:
+        async def stop(
+            self,
+            client: docker.DockerClient,
+            server_ids: Optional[Iterable[str]] = None,
+            force: bool = False,
+        ) -> None:
             """Stop the SQL docker containers for these tests when :attr:`keep`
             is ``False``.
 
             :param client: A ``docker.DockerClient`` instance.
             """
-            if not self.keep:
-                logger.info("Killing test containers.")
-                for s in self.servers:
-                    s.stop(client)
+            if not force and self.keep:
+                logger.info("Keeping containers.")
+                return
 
-            logger.info("Keeping containers.")
+            logger.info("Killing test containers.")
+            if not server_ids:
+                server_ids = self.servers_included
+            tasks = (s.stop(client, force) for s in self.servers if s.id in server_ids)
+            await asyncio.gather(*tasks)
 
         def clean(self, client: docker.DockerClient) -> None:
             """Clean up all existing containers specified by this
@@ -268,14 +322,60 @@ class Config(BaseYamlSettings):
             for container in containers:
                 container.remove()
 
+        # Defaults for containers
+        # Applying these should overwrite
+        # common_password: Optional[str]
+        # common_username: Optional[str]
+        # common_database: Optional[str]
+        # @model_validator(mode="after")
+        # def apply_common(self, data: Any) -> Self:
+        #     for server in self.servers:
+        #         for attr in {"password", "username", "database"}:
+        #             setattr(server, attr,
+        #         server.host
+        #     ...
+
+        # Meta
+        servers_included: Set[str]  # List of ids. Defaults to all.
         servers: List[Server]
         keep: bool = True
         concurrent: bool = True
 
+        @model_validator(mode="after")
+        def check_servers_included(self, data: Any) -> Self:
+            logger.debug("Checking `servers_included`.")
+            if not len(self.servers_included):
+                self.servers_included = {s.id for s in self.servers}
+            else:
+                self.servers_included = {
+                    server.id
+                    for server in self.servers
+                    if server.id in self.servers_included
+                }
+                self.servers = [
+                    server
+                    for server in self.servers
+                    if server.id in self.servers_included
+                ]
+
+            logger.debug(
+                "Checking that `servers_included` and `servers` are sufficient."
+            )
+            if not self.servers_included:
+                raise AssertionError(
+                    "No servers included, please check that "
+                    "`config.servers.servers_included` contains only valid "
+                    "`id` entries."
+                )
+            if not self.servers:
+                raise AssertionError("`servers` must not be falsy.")
+
+            return self
+
     servers: Servers
 
 
-config = Config()
+config = Config()  # type: ignore
 
 
 # =========================================================================== #
