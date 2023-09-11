@@ -213,4 +213,4 @@ def ormManyMany() -> RawCases:
     return (A, B, C)
 
 
-__all__ = ("ormCases", "ormCycle", "ormConnected", "ormManyMany")
+__all__ = ("ormCases", "ormCycle", "ormConnected", "ormManyMany", "ormDecl")
