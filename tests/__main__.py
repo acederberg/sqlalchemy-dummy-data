@@ -8,9 +8,10 @@ import json
 import logging
 from typing import Annotated, Iterable, List
 
-import docker
 import typer
 from pydantic import BaseModel
+
+import docker
 
 from .conftest import config
 
@@ -103,6 +104,12 @@ class CommandsDocker(metaclass=WithTyper):
                 force=force,
             )
         )
+
+    @classmethod
+    def hosts(cls, server_ids: OServerIds = None):
+        print("Hosts")
+        result = asyncio.run(config.servers.hosts(DOCKER_CLIENT, server_ids=server_ids))
+        print(json.dumps(result, indent=2))
 
 
 class CommandsConfig(metaclass=WithTyper):

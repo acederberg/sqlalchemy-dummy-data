@@ -63,7 +63,6 @@ def as_case(fn: DummyCaseGeneratorRaw) -> DummyCaseGenerator:
     def wrapper(ormDecl: SQLAlchemyOrmTuple, request) -> Cases:
         param = getattr(request, "param", None)
         hasparam = request is not None and param is not None
-        print(param, hasparam)
         if hasparam and not isinstance(param, bool):
             _msg = "Cannot parametrize `{0}` with non-boolean value `{1}`."
             raise ValueError(_msg.format(fn.__name__, param))

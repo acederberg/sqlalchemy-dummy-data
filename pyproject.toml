@@ -63,6 +63,8 @@ test = [
 	"pytest",
   "pydantic>=2",
   "yaml-settings-pydantic>=2",
+  "psycopg2-binary",
+  "PyMySQL"
 ]
 
 

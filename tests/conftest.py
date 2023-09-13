@@ -2,6 +2,7 @@
 
 Includes docker tools for running tests against multiple SQL flavors.
 """
+import asyncio
 import logging
 from os import path
 
@@ -19,6 +20,7 @@ from .docker import Server, Servers, WithServers
 
 logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG
+DOCKER_CLIENT_TESTS = docker.from_env()
 
 
 def ubuv(fn: str) -> str:
@@ -29,9 +31,6 @@ def ubuv(fn: str) -> str:
 # Configuration
 
 
-# TODO: Long term plan should be to run docker tests concurrently for many
-# drivers so that we know it works with various sql flavors. Concurency will
-# be implemented in pipelines by providing different configuration instances.
 class Config(BaseYamlSettings):
     """Configuration for tests and fixtures.
 
@@ -40,7 +39,7 @@ class Config(BaseYamlSettings):
 
     __yaml_files__ = ubuv("tests.yaml")
 
-    servers: Servers
+    servers: Servers  # type: ignore
 
 
 config = Config()  # type: ignore
@@ -55,17 +54,6 @@ def withservers(params):
     if config is None:
         raise AssertionError("Could not find ``config``.")
     return WithServers(config.servers, params)
-
-
-@withservers(
-    {
-        "arg": (_args := ["first arg", "second arg", "third arg"]),
-    },
-)
-class TestWithServers:
-    def test_it_works(self, Engine, arg):
-        assert isinstance(Engine, SQAEngine)
-        assert arg in _args
 
 
 # =========================================================================== #
@@ -89,9 +77,9 @@ def Servers(request):
         raise ValueError("Parameter must be an instance of TestConfig.")
 
     client = docker.from_env()
-    engines = c.servers.start(client)
+    engines = asyncio.run(c.servers.start(client))
     yield engines
-    c.servers.stop(client)
+    asyncio.run(c.servers.stop(client))
 
 
 @pytest.fixture(params=[[config, "mysql"]])
@@ -115,4 +103,4 @@ def Engine(ServerConfig: Server) -> SQAEngine:
     See :func:`ServerConfig`.
     """
 
-    return ServerConfig.engine()
+    return asyncio.run(ServerConfig.engine(DOCKER_CLIENT_TESTS))

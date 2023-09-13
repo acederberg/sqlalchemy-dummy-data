@@ -52,7 +52,12 @@ def asyncronize(fn: Callable[T, S]) -> Callable[T, Coroutine[Any, Any, S]]:
 class Host(BaseModel):
     """Specifications for the docker container that has been run.
 
-    :attr host: The ip address or hostname for the running container.
+    The ip address of the host will be determined by using the docker library
+    and the user shouldn't need to provide it.
+
+    ..
+        :attr host: The ip address or hostname for the running container.
+
     :attr port: The port on which the mysql containers are running.
     :attr database: The database to work within for this connection.
     :attr username: The username to run the tests within the container
@@ -61,7 +66,6 @@ class Host(BaseModel):
         :attr:`username`.
     """
 
-    host: str = "localhost"
     port: int = 3306
     database: str = "tests"
     username: str = "test_user"
@@ -103,8 +107,8 @@ class Server(BaseModel):
 
     driver: Optional[str] = None
     dialect: str = "mysql"
-    host: Host
     container: Container
+    hostspec: Host
     id: str
 
     def env(self) -> Dict[str, str]:
@@ -117,9 +121,9 @@ class Server(BaseModel):
         """
 
         environ = {
-            self.container.env_username: self.host.username,
-            self.container.env_password: self.host.password,
-            self.container.env_initdb: self.host.database,
+            self.container.env_username: self.hostspec.username,
+            self.container.env_password: self.hostspec.password,
+            self.container.env_initdb: self.hostspec.database,
         }
         if (rest := self.container.env) is not None:
             environ.update(rest)
@@ -135,26 +139,37 @@ class Server(BaseModel):
             )
         )
 
-    def url(self) -> URL:
+    async def url(self, client: docker.DockerClient) -> URL:
         """Create a URL to connect to the database."""
         scheme = (
             f"{self.dialect}.{self.driver}"
             if self.driver is not None
             else self.dialect  #
         )
-        return URL.create(scheme, **self.host.model_dump())
+        host_ips = await self.host(client)
+        if host_ips is None:
+            raise ValueError(f"No ips for container with id `{self.id}`.")
+        elif (host_ip := host_ips.get("bridge")) is None:
+            raise ValueError("Bridge networking required.")
+        return URL.create(
+            scheme,
+            host=host_ip,
+            **self.hostspec.model_dump(),
+        )
 
-    def engine(self) -> SQAEngine:
+    async def engine(self, client: docker.DockerClient) -> SQAEngine:
         """Get a connection pool for the server."""
         logger.debug(
             "Generating engine for container `%s`.",
             self.container_name(),
         )
-        return create_engine(url=self.url())
+        return create_engine(url=await self.url(client))
 
     def get(self, client: docker.DockerClient) -> DockerContainer | None:
         """Attempt to find the container state associated with this
         configuration.
+
+        Not async for now.
 
         :param client: A ``docker.DockerClient`` instance.
         :returns: JSON response from the DockerClient.
@@ -169,7 +184,24 @@ class Server(BaseModel):
         )
 
     @asyncronize
-    def start(self, client: docker.DockerClient) -> SQAEngine:
+    def inspect(self, client: docker.DockerClient) -> Dict[str, Any] | None:
+        container = self.get(client)
+        if container is None:
+            return None
+
+        name = container.name
+        inspected = client.api.inspect_container(name)
+        return inspected
+
+    async def host(self, client: docker.DockerClient) -> Dict[str, str] | None:
+        result = await self.inspect(client)
+        if result is None:
+            return None
+
+        networks = result["NetworkSettings"]["Networks"]
+        return {name: spec["IPAddress"] for name, spec in networks.items()}
+
+    async def start(self, client: docker.DockerClient) -> SQAEngine:
         """Start the container associated with this configuration.
 
         :param client: A ``docker.DockerClient`` instance.
@@ -209,7 +241,7 @@ class Server(BaseModel):
                 raise AssertionError(f"Failed to restart `{name}`.")
             """
 
-        return self.engine()
+        return await self.engine(client)
 
     @asyncronize
     def stop(self, client: docker.DockerClient, force: bool = False) -> None:
@@ -287,6 +319,16 @@ class Servers(BaseModel):
             raise AssertionError("`servers` must not be falsy.")
 
         return self
+
+    async def hosts(
+        self, client, server_ids: Optional[Iterable[str]] = None
+    ) -> Dict[str, Dict[str, Any]]:
+        if not server_ids:
+            server_ids = self.servers_included
+        tasks = {s.id: s.host(client) for s in self.servers if s.id in server_ids}
+        hosts = await asyncio.gather(*tasks.values())
+
+        return {k: v for k, v in zip(tasks, hosts)}
 
     async def start(
         self,
