@@ -6,14 +6,12 @@ import asyncio
 import logging
 from os import path
 
+import docker
 import pytest
 from sqlalchemy.engine import Engine as SQAEngine
+from test_sdd.cases import *
+from test_sdd.controllers.docker import Server, Servers, WithServers
 from yaml_settings_pydantic import BaseYamlSettings
-
-import docker
-
-from .cases import *
-from .docker import Server, Servers, WithServers
 
 # =========================================================================== #
 # Helprs and constants
@@ -21,28 +19,6 @@ from .docker import Server, Servers, WithServers
 logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG
 DOCKER_CLIENT_TESTS = docker.from_env()
-
-
-def ubuv(fn: str) -> str:
-    return path.realpath(path.join(path.dirname(__file__), "..", fn))
-
-
-# =========================================================================== #
-# Configuration
-
-
-class Config(BaseYamlSettings):
-    """Configuration for tests and fixtures.
-
-    :attr servers: Configuration for the various servers.
-    """
-
-    __yaml_files__ = ubuv("tests.yaml")
-
-    servers: Servers  # type: ignore
-
-
-config = Config()  # type: ignore
 
 
 # =========================================================================== #

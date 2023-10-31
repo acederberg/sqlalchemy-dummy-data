@@ -224,7 +224,8 @@ class DummyMixins:
         }
         return fk_coproduct
 
-    # TODO:
+    # ----------------------------------------------------------------------- #
+
     @classmethod
     def _create_iter_fks(
         cls,
@@ -372,7 +373,6 @@ def create_dummy_meta(Base) -> Type:
         """Metaclass for dummy data generation.
 
         Documentation on class attributes can be found on the instances.
-
         """
 
         tables = dict()
