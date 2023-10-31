@@ -57,7 +57,8 @@ dev = [
 	"mypy",
 	"isort"
 ]
-test = [
+# Dependencies for test_sdd
+test_sdd = [
   "docker",
   "typer",
 	"pytest",
@@ -108,4 +109,4 @@ push            = false
 
 [tool.bumpver.file_patterns]
 "pyproject.toml" = ['current_version = "{version}"', 'version = "{version}"']
-"sqlalchemy-dummy-data/__init__.py" = ["{version}"]
+"src/sqlalchemy-dummy-data/__init__.py" = ["{version}"]
