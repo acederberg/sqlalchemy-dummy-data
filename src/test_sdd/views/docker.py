@@ -2,25 +2,25 @@ import asyncio
 import json
 
 from pydantic import BaseModel
-from sdd_tests.conftest import config
-from sdd_tests.views import flags
-from sdd_tests.views.base import BaseViews
+from test_sdd.views import flags
+from test_sdd.views.base import BaseViews
 
 import docker
 
 
 class Docker(BaseViews):
     __subcommand__ = "docker"
+    __controller__ = "servers"
 
     @classmethod
     def clean(cls):
         print("Cleaning docker containers.")
-        config.servers.clean(cls.ctx)
+        cls.ctx.config.servers.clean()
 
     @classmethod
     def start(cls, server_ids: flags.OServerIds = None):
         print("Starting all docker containers.")
-        task = config.servers.start(
+        task = cls.ctx.config.servers.start(
             cls.ctx,
             server_ids=server_ids,
         )

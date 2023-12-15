@@ -1,9 +1,10 @@
 from typing import Optional
 
 import docker
+from yaml_settings_pydantic import BaseYamlSettings
+
 from test_sdd import assets
 from test_sdd.controllers.docker import Servers
-from yaml_settings_pydantic import BaseYamlSettings
 
 
 class Config(BaseYamlSettings):
@@ -12,7 +13,7 @@ class Config(BaseYamlSettings):
     :attr servers: Configuration for the various servers.
     """
 
-    __yaml_files__ = assets.ubuv("tests.yaml")
+    __yaml_files__ = assets.Assets.ubuv("tests.yaml")
 
     servers: Servers  # type: ignore
 
@@ -28,8 +29,8 @@ class Context:
 
     def __init__(
         self,
-        _client: Optional[docker.DockerClient],
-        _config: Optional[Config],
+        _client: Optional[docker.DockerClient] = None,
+        _config: Optional[Config] = None,
     ):
         self.config = Config()  # type: ignore
         self.client = docker.from_env()

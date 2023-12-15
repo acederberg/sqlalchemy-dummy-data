@@ -29,7 +29,7 @@ class ViewsMeta(type):
         }
 
         cls.add_children(name, bases, namespace)
-        T = cls.__new__(cls, name, bases, namespace)
+        T = super().__new__(cls, name, bases, namespace)
         cls.add_commands(T, commands)
         return T
 

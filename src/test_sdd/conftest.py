@@ -9,13 +9,16 @@ from os import path
 import docker
 import pytest
 from sqlalchemy.engine import Engine as SQAEngine
-from test_sdd.cases import *
-from test_sdd.controllers.docker import Server, Servers, WithServers
 from yaml_settings_pydantic import BaseYamlSettings
+
+from test_sdd.cases import *
+from test_sdd.config import Context
+from test_sdd.controllers.docker import Server, Servers, WithServers
 
 # =========================================================================== #
 # Helprs and constants
 
+PYTEST_CONTEXT = Context()
 logger = logging.getLogger(__name__)
 logger.level = logging.DEBUG
 DOCKER_CLIENT_TESTS = docker.from_env()
@@ -37,7 +40,7 @@ def withservers(params):
 
 
 # TODO: Start all containers at once
-@pytest.fixture(params=[config], scope="session", autouse=True)
+@pytest.fixture(params=[PYTEST_CONTEXT.config], scope="session", autouse=True)
 def Servers(request):
     """Start and stop servers. This should only happen once per ``pytest```
     call.
@@ -58,7 +61,7 @@ def Servers(request):
     asyncio.run(c.servers.stop(client))
 
 
-@pytest.fixture(params=[[config, "mysql"]])
+@pytest.fixture(params=[[PYTEST_CONTEXT.config, "mysql"]])
 def ServerConfig(request) -> Server:
     """Look for the server configuration with the driver ``request.params[1]``."""
     config, driver = request.param

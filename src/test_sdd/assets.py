@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-PATH_ROOT = path.realpath(path.join(path.dirname(__file__), ".."))
+PATH_ROOT = path.realpath(path.join(path.dirname(__file__), "..", ".."))
 PATH_TESTS = path.join(PATH_ROOT, "tests")
 PATH_ASSETS = path.join(PATH_TESTS, "assets")
 
@@ -22,6 +22,10 @@ class Assets:
     :meth yaml: Load a yaml asset.
     :meth json: Load a json asset.
     """
+
+    @classmethod
+    def ubuv(cls, name: str) -> str:
+        return path.join(PATH_ROOT, name)
 
     @classmethod
     def asset(cls, name: str) -> str:
