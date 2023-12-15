@@ -13,6 +13,10 @@ from test_sdd.views import Views
 
 
 def main():
-    Views.ctx = Context() # type: ignore
+    Views.ctx = Context()  # type: ignore
     Views.propogate_ctx()
     Views.__typer__()
+
+
+if __name__ == "__main__":
+    main()

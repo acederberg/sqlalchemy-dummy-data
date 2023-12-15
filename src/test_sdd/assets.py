@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 
 PATH_ROOT = path.realpath(path.join(path.dirname(__file__), "..", ".."))
-PATH_TESTS = path.join(PATH_ROOT, "tests")
+PATH_TESTS = path.join(PATH_ROOT, "src", "test_sdd")
 PATH_ASSETS = path.join(PATH_TESTS, "assets")
 
 

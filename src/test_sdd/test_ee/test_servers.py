@@ -1,14 +1,13 @@
 from sqlalchemy import Engine as SQAEngine
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
-
-from .. import docker
-from ..cases import Cases
-from ..conftest import config
+from test_sdd.cases import Cases
+from test_sdd.conftest import PYTEST_CONTEXT
+from test_sdd.controllers import docker
 
 
 @docker.WithServers(
-    config.servers,
+    PYTEST_CONTEXT.config.servers,
     {
         "arg": (_args := ["first arg", "second arg", "third arg"]),
     },

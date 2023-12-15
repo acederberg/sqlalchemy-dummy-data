@@ -71,4 +71,6 @@ class ViewsMeta(type):
 
 
 class BaseViews(ViewsMixins, metaclass=ViewsMeta):
-    ...
+    @classmethod
+    def propogate_ctx(cls):
+        ...

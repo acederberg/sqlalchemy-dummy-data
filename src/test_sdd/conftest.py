@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine as SQAEngine
 from yaml_settings_pydantic import BaseYamlSettings
 
 from test_sdd.cases import *
-from test_sdd.config import Context
+from test_sdd.config import Config, Context
 from test_sdd.controllers.docker import Server, Servers, WithServers
 
 # =========================================================================== #
@@ -29,10 +29,7 @@ DOCKER_CLIENT_TESTS = docker.from_env()
 
 
 def withservers(params):
-    config = globals().get("config")
-    if config is None:
-        raise AssertionError("Could not find ``config``.")
-    return WithServers(config.servers, params)
+    return WithServers(PYTEST_CONTEXT.config.servers, params)
 
 
 # =========================================================================== #
